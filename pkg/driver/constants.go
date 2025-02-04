@@ -105,6 +105,28 @@ const (
 
 	// OutpostArn represents key for outpost's arn.
 	OutpostArnKey = "outpostarn"
+
+	// RaidTypeKey represents key for RAID type.
+	RaidTypeKey = "amc.datastax.com/storage-raidtype"
+
+	// RaidStripeCountKey represents key for count of volumes to split the RAID into.
+	RaidStripeCountKey = "amc.datastax.com/storage-raid-volume-count"
+
+	// RaidVolumeName represents key for the name of the RAID volume. This could be equal to PVC name.
+	RaidVolumeName = "amc.datastax.com/storage-raid-volume-name"
+
+	// RaidVolumeId is a key for the real backing volumeID of the RAID stripe.
+	RaidVolumeIDPrefix = "amc.datastax.com/storage-raid-volume-id"
+
+	/*
+		TODO Do we wish to separate two different approaches, to allow LVM growth? Such as:
+
+		1. Define total size of the volume and how many stripes. We calculate the size of each stripe (and round it up to the nearest 1GB)
+		2. Define a size of each stripe and how many of them we add
+
+		In the second approach, what we could later on do is to add a new volume, and then add it to the LVM volume group
+		and then rebalance the data. This would allow us to grow the volume without lengthy EBS volume resizing (which can be done limited times per day)
+	*/
 )
 
 // constants of keys in snapshot parameters.
@@ -169,6 +191,12 @@ const (
 	FSTypeXfs = "xfs"
 	// FSTypeNtfs represents the ntfs filesystem type.
 	FSTypeNtfs = "ntfs"
+)
+
+// constants for raid types.
+const (
+	// RaidType0 represents RAID 0.
+	RaidType0 = "raid0"
 )
 
 // constants for node k8s API use.

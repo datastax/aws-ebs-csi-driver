@@ -21,8 +21,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,7 +111,7 @@ func NewNodeService(o *Options, md metadata.MetadataService, m mounter.Mounter, 
 }
 
 func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-	klog.V(4).InfoS("NodeStageVolume: called", "args", util.SanitizeRequest(req))
+	klog.InfoS("NodeStageVolume: called", "args", util.SanitizeRequest(req))
 
 	volumeID := req.GetVolumeId()
 	if len(volumeID) == 0 {
@@ -154,29 +156,27 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		return nil, status.Errorf(codes.InvalidArgument, "NodeStageVolume: invalid fstype %s", fsType)
 	}
 
-	context := req.GetVolumeContext()
-
-	blockSize, err := recheckFormattingOptionParameter(context, BlockSizeKey, FileSystemConfigs, fsType)
+	blockSize, err := recheckFormattingOptionParameter(volumeContext, BlockSizeKey, FileSystemConfigs, fsType)
 	if err != nil {
 		return nil, err
 	}
-	inodeSize, err := recheckFormattingOptionParameter(context, InodeSizeKey, FileSystemConfigs, fsType)
+	inodeSize, err := recheckFormattingOptionParameter(volumeContext, InodeSizeKey, FileSystemConfigs, fsType)
 	if err != nil {
 		return nil, err
 	}
-	bytesPerInode, err := recheckFormattingOptionParameter(context, BytesPerInodeKey, FileSystemConfigs, fsType)
+	bytesPerInode, err := recheckFormattingOptionParameter(volumeContext, BytesPerInodeKey, FileSystemConfigs, fsType)
 	if err != nil {
 		return nil, err
 	}
-	numInodes, err := recheckFormattingOptionParameter(context, NumberOfInodesKey, FileSystemConfigs, fsType)
+	numInodes, err := recheckFormattingOptionParameter(volumeContext, NumberOfInodesKey, FileSystemConfigs, fsType)
 	if err != nil {
 		return nil, err
 	}
-	ext4BigAlloc, err := recheckFormattingOptionParameter(context, Ext4BigAllocKey, FileSystemConfigs, fsType)
+	ext4BigAlloc, err := recheckFormattingOptionParameter(volumeContext, Ext4BigAllocKey, FileSystemConfigs, fsType)
 	if err != nil {
 		return nil, err
 	}
-	ext4ClusterSize, err := recheckFormattingOptionParameter(context, Ext4ClusterSizeKey, FileSystemConfigs, fsType)
+	ext4ClusterSize, err := recheckFormattingOptionParameter(volumeContext, Ext4ClusterSizeKey, FileSystemConfigs, fsType)
 	if err != nil {
 		return nil, err
 	}
@@ -203,6 +203,38 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		} else {
 			klog.InfoS("NodeStageVolume: invalid partition config, will ignore.", "partition", part)
 		}
+	}
+
+	// TODO Verify here if this is part of the RAID, split the DevicePath to individual devices and build a LVM (or reload existing)
+	if _, exists := req.VolumeContext[RaidTypeKey]; exists {
+		raidVolumeCount, err := strconv.Atoi(req.VolumeContext[RaidStripeCountKey])
+		klog.InfoS("NodeStageVolume: raid volume detected", "volumeID", volumeID, "targetStagingPath", target, "raidVolumeCount", raidVolumeCount)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "Could not parse raidVolumeCount: %v", err)
+		}
+
+		// Scan for all existing volumes first
+		if err := vgActivate(); err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not activate volume group: %v", err)
+		}
+
+		// Is our "new" volume part of existing VG? If not, then create a new one
+		volumeName := volumeContext[RaidVolumeName]
+		exists, err := existingVG(volumeName)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not check if volume group exists: %v", err)
+		}
+
+		devicePaths := strings.Split(devicePath, ",")
+
+		if !exists {
+			// Create a new VG
+			if err := createVG(volumeName, devicePaths); err != nil {
+				return nil, status.Errorf(codes.Internal, "Could not create volume group: %v", err)
+			}
+		}
+
+		// Now the VG exists, we need to LV next
 	}
 
 	source, err := d.mounter.FindDevicePath(devicePath, volumeID, partition, d.metadata.GetRegion())
@@ -287,6 +319,7 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	}
 
 	if needResize {
+		// TODO If RAID volume, do not support resizing yet
 		klog.V(2).InfoS("Volume needs resizing", "source", source)
 		if _, err := d.mounter.Resize(source, target); err != nil {
 			return nil, status.Errorf(codes.Internal, "Could not resize volume %q (%q):  %v", volumeID, source, err)
@@ -294,6 +327,68 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	}
 	klog.V(4).InfoS("NodeStageVolume: successfully staged volume", "source", source, "volumeID", volumeID, "target", target, "fstype", fsType)
 	return &csi.NodeStageVolumeResponse{}, nil
+}
+
+/*
+	Move these to LVM packages for easier rebases later
+*/
+
+// We only support a single VG per node
+// const vgGroupName = "pvcName" // Use the PVC name instead?
+const lvGroupName = "server-data"
+
+type VGReport struct {
+	// VGName is the name of the volume group
+	VGName string `json:"vg_name"`
+	// VGUUId is the UUID of the volume group
+	VGUUId string `json:"vg_uuid"`
+}
+
+func existingVG(vgName string) (bool, error) {
+	/*
+		{
+		    "report": [
+		        {
+		            "vg": [
+		                {"vg_uuid":"pRptgH-tK2V-DXR8-Manj-64Y1-1JpN-BH38AB", "vg_name":"ubuntu-vg", "vg_size":"<473.89g", "vg_free":"0 "}
+		            ]
+		        }
+		    ]
+		}
+	*/
+	// if vgName is in the report, return true
+	return false, nil
+}
+
+// VgActivate execute vgchange -ay to activate all volumes of the volume group
+func vgActivate() error {
+	// scan for vgs and activate if any
+	cmd := exec.Command("vgscan")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		klog.Infof("unable to scan for volumegroups:%s %v", out, err)
+		return err
+	}
+	cmd = exec.Command("vgchange", "-ay")
+	_, err = cmd.CombinedOutput()
+	if err != nil {
+		klog.Infof("unable to activate volumegroups:%s %v", out, err)
+		return err
+	}
+
+	return nil
+}
+
+func createVG(vgName string, devicePaths []string) error {
+	// create a new VG
+	cmd := exec.Command("vgcreate", vgName, strings.Join(devicePaths, " "))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		klog.Infof("unable to create volumegroup:%s %v", out, err)
+		return err
+	}
+
+	return nil
 }
 
 func (d *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
@@ -410,7 +505,7 @@ func (d *NodeService) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandV
 }
 
 func (d *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
-	klog.V(4).InfoS("NodePublishVolume: called", "args", util.SanitizeRequest(req))
+	klog.InfoS("NodePublishVolume: called", "args", util.SanitizeRequest(req))
 	volumeID := req.GetVolumeId()
 	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")

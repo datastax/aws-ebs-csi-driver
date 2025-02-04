@@ -164,7 +164,9 @@ func TestCreateVolume(t *testing.T) {
 				expVol := &csi.Volume{
 					CapacityBytes: stdVolSize,
 					VolumeId:      "vol-test",
-					VolumeContext: map[string]string{},
+					VolumeContext: map[string]string{
+						"test-key": "test-value",
+					},
 					AccessibleTopology: []*csi.Topology{
 						{
 							Segments: map[string]string{

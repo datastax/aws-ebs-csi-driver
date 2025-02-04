@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -125,6 +126,8 @@ func (d *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		numberOfInodes  string
 		ext4BigAlloc    bool
 		ext4ClusterSize string
+		raidVolumeCount int32
+		raidType        string
 	)
 
 	tProps := new(template.PVProps)
@@ -197,6 +200,17 @@ func (d *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 				return nil, status.Errorf(codes.InvalidArgument, "Could not parse ext4ClusterSize (%s): %v", value, err)
 			}
 			ext4ClusterSize = value
+		case RaidTypeKey:
+			if isAlphanumeric := util.StringIsAlphanumeric(value); !isAlphanumeric {
+				return nil, status.Errorf(codes.InvalidArgument, "Could not parse raidTypeKey (%s): %v", value, err)
+			}
+			raidType = value
+		case RaidStripeCountKey:
+			raidVolumeCountKey, err := strconv.ParseInt(value, 10, 32)
+			if err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "Could not parse raidVolumesKey: %v", err)
+			}
+			raidVolumeCount = int32(raidVolumeCountKey)
 		default:
 			if strings.HasPrefix(key, TagKeyPrefix) {
 				scTags = append(scTags, value)
@@ -270,6 +284,15 @@ func (d *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		return nil, status.Errorf(codes.InvalidArgument, "Block Express is only supported on io2 volumes")
 	}
 
+	if raidType != "" && raidVolumeCount < 2 {
+		return nil, status.Errorf(codes.InvalidArgument, "RaidVolumeCount must be greater than 1")
+	}
+
+	if raidType != "" && raidType != RaidType0 {
+		// Only RAID 0 is supported for now
+		return nil, status.Errorf(codes.InvalidArgument, "RaidType %s is not supported", raidType)
+	}
+
 	snapshotID := ""
 	volumeSource := req.GetVolumeContentSource()
 	if volumeSource != nil {
@@ -328,6 +351,39 @@ func (d *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		MultiAttachEnabled:     multiAttach,
 	}
 
+	if raidType == RaidType0 {
+		sizePerDisk := calculateRaid0StripeSize(volSizeBytes, raidVolumeCount)
+		disks := make([]*cloud.Disk, 0, raidVolumeCount)
+		responseCtx[RaidStripeCountKey] = strconv.Itoa(int(raidVolumeCount))
+		responseCtx[RaidTypeKey] = raidType
+		responseCtx[RaidVolumeName] = volName
+
+		for i := int32(0); i < raidVolumeCount; i++ {
+			raidOpts := *opts
+			raidOpts.CapacityBytes = sizePerDisk
+			volumeTags[RaidStripeCountKey] = strconv.Itoa(int(raidVolumeCount))
+
+			disk, err := d.cloud.CreateDisk(ctx, volName, &raidOpts)
+			if err != nil {
+				var errCode codes.Code
+				switch {
+				case errors.Is(err, cloud.ErrNotFound):
+					errCode = codes.NotFound
+				case errors.Is(err, cloud.ErrIdempotentParameterMismatch), errors.Is(err, cloud.ErrAlreadyExists):
+					errCode = codes.AlreadyExists
+				default:
+					errCode = codes.Internal
+				}
+				return nil, status.Errorf(errCode, "Could not create volume %q: %v", volName, err)
+			}
+
+			klog.InfoS("Created disk: ", "volumeId", disk.VolumeID, "volumeName", volName, "volumeSizeInGiB", disk.CapacityGiB)
+
+			disks = append(disks, disk)
+		}
+		return newCreateRaidVolumeResponse(disks, volSizeBytes, responseCtx), nil
+	}
+
 	disk, err := d.cloud.CreateDisk(ctx, volName, opts)
 	if err != nil {
 		var errCode codes.Code
@@ -342,6 +398,13 @@ func (d *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		return nil, status.Errorf(errCode, "Could not create volume %q: %v", volName, err)
 	}
 	return newCreateVolumeResponse(disk, responseCtx), nil
+}
+
+func calculateRaid0StripeSize(volumeSize int64, raidVolumeCount int32) int64 {
+	// RAID 0 stripe size is the volume size divided by the number of volumes
+	// We add a single GiB to the size to ensure we have enough space for LVM metadata and then
+	// round up the entire thing to next full GiB for each volume
+	return int64(math.Ceil(float64(volumeSize+util.GiBToBytes(1)) / float64(raidVolumeCount)))
 }
 
 func validateCreateVolumeRequest(req *csi.CreateVolumeRequest) error {
@@ -375,6 +438,8 @@ func (d *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	}
 	defer d.inFlight.Delete(volumeID)
 
+	// TODO How do we know it's a raid volume?
+
 	if _, err := d.cloud.DeleteDisk(ctx, volumeID); err != nil {
 		if errors.Is(err, cloud.ErrNotFound) {
 			klog.V(4).InfoS("DeleteVolume: volume not found, returning with success")
@@ -394,7 +459,7 @@ func validateDeleteVolumeRequest(req *csi.DeleteVolumeRequest) error {
 }
 
 func (d *ControllerService) ControllerPublishVolume(ctx context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
-	klog.V(4).InfoS("ControllerPublishVolume: called", "args", util.SanitizeRequest(req))
+	klog.InfoS("ControllerPublishVolume: called", "args", util.SanitizeRequest(req))
 	if err := validateControllerPublishVolumeRequest(req); err != nil {
 		return nil, err
 	}
@@ -408,17 +473,48 @@ func (d *ControllerService) ControllerPublishVolume(ctx context.Context, req *cs
 	defer d.inFlight.Delete(volumeID + nodeID)
 
 	klog.V(2).InfoS("ControllerPublishVolume: attaching", "volumeID", volumeID, "nodeID", nodeID)
-	devicePath, err := d.cloud.AttachDisk(ctx, volumeID, nodeID)
-	if err != nil {
-		if errors.Is(err, cloud.ErrNotFound) {
-			klog.InfoS("ControllerPublishVolume: volume not found", "volumeID", volumeID, "nodeID", nodeID)
-			return nil, status.Errorf(codes.NotFound, "Volume %q not found", volumeID)
+
+	devicePath := ""
+	if _, exists := req.VolumeContext[RaidTypeKey]; exists {
+		raidVolumeCount, err := strconv.Atoi(req.VolumeContext[RaidStripeCountKey])
+		klog.InfoS("ControllerPublishVolume: raid volume detected", "volumeID", volumeID, "nodeID", nodeID, "raidVolumeCount", raidVolumeCount)
+		// We need to attach all the volumes
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "Could not parse raidVolumeCount: %v", err)
 		}
-		return nil, status.Errorf(codes.Internal, "Could not attach volume %q to node %q: %v", volumeID, nodeID, err)
+
+		devicePaths := make([]string, 0, raidVolumeCount)
+		for i := 0; i < raidVolumeCount; i++ {
+			diskVolumeId := req.VolumeContext[fmt.Sprintf("%s-%d", RaidVolumeIDPrefix, i)]
+			// raidVolumeName := fmt.Sprintf("%s-%d", volumeID, i)
+			klog.InfoS("Trying to attach raid disk: ", "volumeId", diskVolumeId, "index", i)
+
+			if devicePath, err := d.cloud.AttachDisk(ctx, diskVolumeId, nodeID); err != nil {
+				if errors.Is(err, cloud.ErrNotFound) {
+					klog.InfoS("ControllerPublishVolume: volume not found", "volumeID", diskVolumeId, "nodeID", nodeID)
+					return nil, status.Errorf(codes.NotFound, "Volume %q not found", diskVolumeId)
+				}
+				return nil, status.Errorf(codes.Internal, "Could not attach volume %q to node %q: %v", diskVolumeId, nodeID, err)
+			} else {
+				devicePaths = append(devicePaths, devicePath)
+			}
+		}
+		devicePath = strings.Join(devicePaths, ",")
+	} else {
+		devicePathValue, err := d.cloud.AttachDisk(ctx, volumeID, nodeID)
+		if err != nil {
+			if errors.Is(err, cloud.ErrNotFound) {
+				klog.InfoS("ControllerPublishVolume: volume not found", "volumeID", volumeID, "nodeID", nodeID)
+				return nil, status.Errorf(codes.NotFound, "Volume %q not found", volumeID)
+			}
+			return nil, status.Errorf(codes.Internal, "Could not attach volume %q to node %q: %v", volumeID, nodeID, err)
+		}
+		devicePath = devicePathValue
 	}
+
 	klog.InfoS("ControllerPublishVolume: attached", "volumeID", volumeID, "nodeID", nodeID, "devicePath", devicePath)
 
-	pvInfo := map[string]string{DevicePathKey: devicePath}
+	pvInfo := map[string]string{DevicePathKey: devicePath, RaidStripeCountKey: req.VolumeContext[RaidStripeCountKey], RaidTypeKey: req.VolumeContext[RaidTypeKey]}
 	return &csi.ControllerPublishVolumeResponse{PublishContext: pvInfo}, nil
 }
 
@@ -458,6 +554,27 @@ func (d *ControllerService) ControllerUnpublishVolume(ctx context.Context, req *
 	defer d.inFlight.Delete(volumeID + nodeID)
 
 	klog.V(2).InfoS("ControllerUnpublishVolume: detaching", "volumeID", volumeID, "nodeID", nodeID)
+
+	// TODO We have no context here, how do we know it's a raid volume?
+
+	// if _, exists := req.VolumeContext[RaidTypeKey]; exists {
+	// 	// We need to detach all the volumes
+	// 	raidVolumeCount, err := strconv.Atoi(req.VolumeContext[RaidStripeCountKey])
+	// 	if err != nil {
+	// 		return nil, status.Errorf(codes.InvalidArgument, "Could not parse raidVolumeCount: %v", err)
+	// 	}
+	// 	for i := 0; i < raidVolumeCount; i++ {
+	// 		raidVolumeName := fmt.Sprintf("%s-%d", volumeID, i)
+	// 		if err := d.cloud.DetachDisk(ctx, raidVolumeName, nodeID); err != nil {
+	// 			if errors.Is(err, cloud.ErrNotFound) {
+	// 				klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", raidVolumeName, "nodeID", nodeID)
+	// 				return &csi.ControllerUnpublishVolumeResponse{}, nil
+	// 			}
+	// 			return nil, status.Errorf(codes.Internal, "Could not detach volume %q from node %q: %v", raidVolumeName, nodeID, err)
+	// 		}
+	// 	}
+	// }
+
 	if err := d.cloud.DetachDisk(ctx, volumeID, nodeID); err != nil {
 		if errors.Is(err, cloud.ErrNotFound) {
 			klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", volumeID, "nodeID", nodeID)
@@ -543,6 +660,8 @@ func (d *ControllerService) ControllerExpandVolume(ctx context.Context, req *csi
 	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
 	}
+
+	// TODO If using raid, reject this.
 
 	capRange := req.GetCapacityRange()
 	if capRange == nil {
@@ -916,6 +1035,46 @@ func getOutpostArn(requirement *csi.TopologyRequirement) string {
 	}
 
 	return ""
+}
+
+func newCreateRaidVolumeResponse(disks []*cloud.Disk, totalSize int64, ctx map[string]string) *csi.CreateVolumeResponse {
+	segments := map[string]string{WellKnownZoneTopologyKey: disks[0].AvailabilityZone}
+
+	arn, err := arn.Parse(disks[0].OutpostArn)
+
+	if err == nil {
+		segments[AwsRegionKey] = arn.Region
+		segments[AwsPartitionKey] = arn.Partition
+		segments[AwsAccountIDKey] = arn.AccountID
+		segments[AwsOutpostIDKey] = strings.ReplaceAll(arn.Resource, "outpost/", "")
+	}
+
+	/*
+		I0131 12:49:53.955465       1 controller.go:1081] "Returning CreateVolumeResponse" response="volume:{capacity_bytes:3221225472 volume_id:\"vol-05c64c0dd12b9de2d\" volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-0\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-0\"} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-1\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-1\"} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-2\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-2\"} volume_context:{key:\"amc.datastax.com/storage-raidtype\" value:\"raid0\"} volume_context:{key:\"amc.datastax.com/storage-volume-count\" value:\"3\"} volume_context:{key:\"amc.datastax.com/storage-volume-id\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef\"} volume_context:{key:\"amc.datastax.com/volume-id-0\" value:\"vol-05c64c0dd12b9de2d\"} volume_context:{key:\"amc.datastax.com/volume-id-1\" value:\"vol-0d487614ffc75dd3f\"} volume_context:{key:\"amc.datastax.com/volume-id-2\" value:\"vol-0b66f022259db7904\"} accessible_topology:{segments:{key:\"topology.kubernetes.io/zone\" value:\"us-east-2c\"}}}"
+		I0131 12:49:54.834532       1 controller.go:464] "ControllerPublishVolume: called" args="volume_id:\"vol-05c64c0dd12b9de2d\" node_id:\"i-06db7953e8e31deae\" volume_capability:{mount:{fs_type:\"ext4\"} access_mode:{mode:SINGLE_NODE_WRITER}} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-0\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-0\"} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-1\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-1\"} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-2\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-2\"} volume_context:{key:\"amc.datastax.com/storage-raidtype\" value:\"raid0\"} volume_context:{key:\"amc.datastax.com/storage-volume-count\" value:\"3\"} volume_context:{key:\"amc.datastax.com/storage-volume-id\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef\"} volume_context:{key:\"amc.datastax.com/volume-id-0\" value:\"vol-05c64c0dd12b9de2d\"} volume_context:{key:\"amc.datastax.com/volume-id-1\" value:\"vol-0d487614ffc75dd3f\"} volume_context:{key:\"amc.datastax.com/volume-id-2\" value:\"vol-0b66f022259db7904\"} volume_context:{key:\"storage.kubernetes.io/csiProvisionerIdentity\" value:\"1738326725744-3557-ebs.csi.aws.com\"}"
+	*/
+
+	pvcName := ctx[RaidVolumeName]
+	for i, disk := range disks {
+		ctx[fmt.Sprintf("%s-%d", RaidVolumeIDPrefix, i)] = disk.VolumeID
+	}
+
+	res := &csi.CreateVolumeResponse{
+		Volume: &csi.Volume{
+			VolumeId:      pvcName, // This is intentionally not a real volumeID
+			CapacityBytes: totalSize,
+			VolumeContext: ctx,
+			AccessibleTopology: []*csi.Topology{
+				{
+					Segments: segments,
+				},
+			},
+		},
+	}
+
+	klog.InfoS("Returning CreateVolumeResponse", "response", res)
+
+	return res
 }
 
 func newCreateVolumeResponse(disk *cloud.Disk, ctx map[string]string) *csi.CreateVolumeResponse {
