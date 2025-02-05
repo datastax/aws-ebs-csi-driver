@@ -118,6 +118,9 @@ const (
 	// RaidVolumeId is a key for the real backing volumeID of the RAID stripe.
 	RaidVolumeIDPrefix = "amc.datastax.com/storage-raid-volume-id"
 
+	// RaidVolumeSize is a key for the size of the RAID stripe.
+	RaidVolumeSize = "amc.datastax.com/storage-raid-volume-size"
+
 	/*
 		TODO Do we wish to separate two different approaches, to allow LVM growth? Such as:
 

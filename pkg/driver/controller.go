@@ -357,6 +357,7 @@ func (d *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		responseCtx[RaidStripeCountKey] = strconv.Itoa(int(raidVolumeCount))
 		responseCtx[RaidTypeKey] = raidType
 		responseCtx[RaidVolumeName] = volName
+		responseCtx[RaidVolumeSize] = strconv.FormatInt(volSizeBytes, 10)
 
 		for i := int32(0); i < raidVolumeCount; i++ {
 			raidOpts := *opts

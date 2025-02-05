@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -32,6 +31,7 @@ import (
 	"github.com/kubernetes-sigs/aws-ebs-csi-driver/pkg/cloud"
 	"github.com/kubernetes-sigs/aws-ebs-csi-driver/pkg/cloud/metadata"
 	"github.com/kubernetes-sigs/aws-ebs-csi-driver/pkg/driver/internal"
+	"github.com/kubernetes-sigs/aws-ebs-csi-driver/pkg/driver/internal/lvmd/command"
 	"github.com/kubernetes-sigs/aws-ebs-csi-driver/pkg/mounter"
 	"github.com/kubernetes-sigs/aws-ebs-csi-driver/pkg/util"
 	"google.golang.org/grpc/codes"
@@ -208,33 +208,61 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	// TODO Verify here if this is part of the RAID, split the DevicePath to individual devices and build a LVM (or reload existing)
 	if _, exists := req.VolumeContext[RaidTypeKey]; exists {
 		raidVolumeCount, err := strconv.Atoi(req.VolumeContext[RaidStripeCountKey])
+		volumeName := volumeContext[RaidVolumeName]
 		klog.InfoS("NodeStageVolume: raid volume detected", "volumeID", volumeID, "targetStagingPath", target, "raidVolumeCount", raidVolumeCount)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "Could not parse raidVolumeCount: %v", err)
 		}
 
+		devices := strings.Split(devicePath, ",")
+
+		ctx := context.Background()
+
 		// Scan for all existing volumes first
-		if err := vgActivate(); err != nil {
-			return nil, status.Errorf(codes.Internal, "Could not activate volume group: %v", err)
+		if err := command.ScanVolumeGroups(ctx, devices); err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not scan volume groups: %v", err)
 		}
 
-		// Is our "new" volume part of existing VG? If not, then create a new one
-		volumeName := volumeContext[RaidVolumeName]
-		exists, err := existingVG(volumeName)
+		vg, err := command.FindVolumeGroup(ctx, volumeName)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "Could not check if volume group exists: %v", err)
+			return nil, status.Errorf(codes.Internal, "Could not search for volume group: %v", err)
 		}
 
-		devicePaths := strings.Split(devicePath, ",")
-
-		if !exists {
+		if vg == nil {
 			// Create a new VG
-			if err := createVG(volumeName, devicePaths); err != nil {
+			var err error
+			vg, err = command.CreateVolumeGroup(ctx, volumeName, devices)
+			if err != nil {
 				return nil, status.Errorf(codes.Internal, "Could not create volume group: %v", err)
 			}
 		}
 
-		// Now the VG exists, we need to LV next
+		if err := vg.Activate(ctx); err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not activate volume group: %v", err)
+		}
+
+		// Now move to create the LV
+		lv, err := vg.FindVolume(ctx, lvGroupName)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not search for logical volume: %v", err)
+		}
+
+		if lv == nil {
+			stripeSize := "4" // TODO This is now 4kB stripeSize, do we wish to increase this to 64kB?
+			volSizeBytes, err := strconv.Atoi(req.GetVolumeContext()[RaidVolumeSize])
+			if err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "Could not parse volume size: %v", err)
+			}
+			if err := vg.CreateVolume(ctx, lvGroupName, uint64(volSizeBytes), []string{}, uint(raidVolumeCount), stripeSize, nil); err != nil {
+				return nil, status.Errorf(codes.Internal, "Could not create logical volume: %v", err)
+			}
+		}
+
+		if err := lv.Activate(ctx, "rw"); err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not activate logical volume: %v", err)
+		}
+
+		devicePath = lv.Path()
 	}
 
 	source, err := d.mounter.FindDevicePath(devicePath, volumeID, partition, d.metadata.GetRegion())
@@ -336,60 +364,6 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 // We only support a single VG per node
 // const vgGroupName = "pvcName" // Use the PVC name instead?
 const lvGroupName = "server-data"
-
-type VGReport struct {
-	// VGName is the name of the volume group
-	VGName string `json:"vg_name"`
-	// VGUUId is the UUID of the volume group
-	VGUUId string `json:"vg_uuid"`
-}
-
-func existingVG(vgName string) (bool, error) {
-	/*
-		{
-		    "report": [
-		        {
-		            "vg": [
-		                {"vg_uuid":"pRptgH-tK2V-DXR8-Manj-64Y1-1JpN-BH38AB", "vg_name":"ubuntu-vg", "vg_size":"<473.89g", "vg_free":"0 "}
-		            ]
-		        }
-		    ]
-		}
-	*/
-	// if vgName is in the report, return true
-	return false, nil
-}
-
-// VgActivate execute vgchange -ay to activate all volumes of the volume group
-func vgActivate() error {
-	// scan for vgs and activate if any
-	cmd := exec.Command("vgscan")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		klog.Infof("unable to scan for volumegroups:%s %v", out, err)
-		return err
-	}
-	cmd = exec.Command("vgchange", "-ay")
-	_, err = cmd.CombinedOutput()
-	if err != nil {
-		klog.Infof("unable to activate volumegroups:%s %v", out, err)
-		return err
-	}
-
-	return nil
-}
-
-func createVG(vgName string, devicePaths []string) error {
-	// create a new VG
-	cmd := exec.Command("vgcreate", vgName, strings.Join(devicePaths, " "))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		klog.Infof("unable to create volumegroup:%s %v", out, err)
-		return err
-	}
-
-	return nil
-}
 
 func (d *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
 	klog.V(4).InfoS("NodeUnstageVolume: called", "args", req)
