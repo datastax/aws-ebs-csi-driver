@@ -208,7 +208,7 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 	// TODO Verify here if this is part of the RAID, split the DevicePath to individual devices and build a LVM (or reload existing)
 	if _, exists := req.VolumeContext[RaidTypeKey]; exists {
 		raidVolumeCount, err := strconv.Atoi(req.VolumeContext[RaidStripeCountKey])
-		volumeName := volumeContext[RaidVolumeName]
+		volumeName := volumeContext[PVCVolumeName]
 		klog.InfoS("NodeStageVolume: raid volume detected", "volumeID", volumeID, "targetStagingPath", target, "raidVolumeCount", raidVolumeCount)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "Could not parse raidVolumeCount: %v", err)

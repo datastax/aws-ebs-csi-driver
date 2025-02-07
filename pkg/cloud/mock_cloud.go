@@ -179,6 +179,15 @@ func (m *MockCloud) GetDiskByName(ctx context.Context, name string, capacityByte
 	return ret0, ret1
 }
 
+// GetDiskByName mocks base method.
+func (m *MockCloud) GetDisksByName(ctx context.Context, name string) (disks []*Disk, err error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDisksByName", ctx, name)
+	ret0, _ := ret[0].([]*Disk)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
 // GetDiskByName indicates an expected call of GetDiskByName.
 func (mr *MockCloudMockRecorder) GetDiskByName(ctx, name, capacityBytes interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()

@@ -356,7 +356,7 @@ func (d *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		disks := make([]*cloud.Disk, 0, raidVolumeCount)
 		responseCtx[RaidStripeCountKey] = strconv.Itoa(int(raidVolumeCount))
 		responseCtx[RaidTypeKey] = raidType
-		responseCtx[RaidVolumeName] = volName
+		responseCtx[PVCVolumeName] = volName
 		responseCtx[RaidVolumeSize] = strconv.FormatInt(volSizeBytes, 10)
 
 		for i := int32(0); i < raidVolumeCount; i++ {
@@ -439,14 +439,35 @@ func (d *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 	}
 	defer d.inFlight.Delete(volumeID)
 
-	// TODO How do we know it's a raid volume?
-
-	if _, err := d.cloud.DeleteDisk(ctx, volumeID); err != nil {
-		if errors.Is(err, cloud.ErrNotFound) {
-			klog.V(4).InfoS("DeleteVolume: volume not found, returning with success")
-			return &csi.DeleteVolumeResponse{}, nil
+	// TODO This only works if the PVC naming follows this syntax, fix this.
+	if strings.HasPrefix(volumeID, "pvc-") {
+		// We need to detach all the volumes
+		disks, err := d.cloud.GetDisksByName(ctx, volumeID)
+		if err != nil {
+			if errors.Is(err, cloud.ErrNotFound) {
+				klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", volumeID)
+				return &csi.DeleteVolumeResponse{}, nil
+			}
+			return nil, status.Errorf(codes.Internal, "Could not detach volume %q: %v", volumeID, err)
 		}
-		return nil, status.Errorf(codes.Internal, "Could not delete volume ID %q: %v", volumeID, err)
+
+		for _, disk := range disks {
+			if _, err := d.cloud.DeleteDisk(ctx, disk.VolumeID); err != nil {
+				if errors.Is(err, cloud.ErrNotFound) {
+					klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", disk.VolumeID)
+					return &csi.DeleteVolumeResponse{}, nil
+				}
+				return nil, status.Errorf(codes.Internal, "Could not delete volume %q %q: %v", disk.VolumeID, err)
+			}
+		}
+	} else {
+		if _, err := d.cloud.DeleteDisk(ctx, volumeID); err != nil {
+			if errors.Is(err, cloud.ErrNotFound) {
+				klog.V(4).InfoS("DeleteVolume: volume not found, returning with success")
+				return &csi.DeleteVolumeResponse{}, nil
+			}
+			return nil, status.Errorf(codes.Internal, "Could not delete volume ID %q: %v", volumeID, err)
+		}
 	}
 
 	return &csi.DeleteVolumeResponse{}, nil
@@ -556,33 +577,37 @@ func (d *ControllerService) ControllerUnpublishVolume(ctx context.Context, req *
 
 	klog.V(2).InfoS("ControllerUnpublishVolume: detaching", "volumeID", volumeID, "nodeID", nodeID)
 
-	// TODO We have no context here, how do we know it's a raid volume?
-
-	// if _, exists := req.VolumeContext[RaidTypeKey]; exists {
-	// 	// We need to detach all the volumes
-	// 	raidVolumeCount, err := strconv.Atoi(req.VolumeContext[RaidStripeCountKey])
-	// 	if err != nil {
-	// 		return nil, status.Errorf(codes.InvalidArgument, "Could not parse raidVolumeCount: %v", err)
-	// 	}
-	// 	for i := 0; i < raidVolumeCount; i++ {
-	// 		raidVolumeName := fmt.Sprintf("%s-%d", volumeID, i)
-	// 		if err := d.cloud.DetachDisk(ctx, raidVolumeName, nodeID); err != nil {
-	// 			if errors.Is(err, cloud.ErrNotFound) {
-	// 				klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", raidVolumeName, "nodeID", nodeID)
-	// 				return &csi.ControllerUnpublishVolumeResponse{}, nil
-	// 			}
-	// 			return nil, status.Errorf(codes.Internal, "Could not detach volume %q from node %q: %v", raidVolumeName, nodeID, err)
-	// 		}
-	// 	}
-	// }
-
-	if err := d.cloud.DetachDisk(ctx, volumeID, nodeID); err != nil {
-		if errors.Is(err, cloud.ErrNotFound) {
-			klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", volumeID, "nodeID", nodeID)
-			return &csi.ControllerUnpublishVolumeResponse{}, nil
+	// TODO This only works if the PVC naming follows this syntax, fix this.
+	if strings.HasPrefix(volumeID, "pvc-") {
+		// We need to detach all the volumes
+		disks, err := d.cloud.GetDisksByName(ctx, volumeID)
+		if err != nil {
+			if errors.Is(err, cloud.ErrNotFound) {
+				klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", volumeID, "nodeID", nodeID)
+				return &csi.ControllerUnpublishVolumeResponse{}, nil
+			}
+			return nil, status.Errorf(codes.Internal, "Could not detach volume %q from node %q: %v", volumeID, nodeID, err)
 		}
-		return nil, status.Errorf(codes.Internal, "Could not detach volume %q from node %q: %v", volumeID, nodeID, err)
+
+		for _, disk := range disks {
+			if err := d.cloud.DetachDisk(ctx, disk.VolumeID, nodeID); err != nil {
+				if errors.Is(err, cloud.ErrNotFound) {
+					klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", disk.VolumeID, "nodeID", nodeID)
+					return &csi.ControllerUnpublishVolumeResponse{}, nil
+				}
+				return nil, status.Errorf(codes.Internal, "Could not detach volume %q from node %q: %v", disk.VolumeID, nodeID, err)
+			}
+		}
+	} else {
+		if err := d.cloud.DetachDisk(ctx, volumeID, nodeID); err != nil {
+			if errors.Is(err, cloud.ErrNotFound) {
+				klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", volumeID, "nodeID", nodeID)
+				return &csi.ControllerUnpublishVolumeResponse{}, nil
+			}
+			return nil, status.Errorf(codes.Internal, "Could not detach volume %q from node %q: %v", volumeID, nodeID, err)
+		}
 	}
+
 	klog.InfoS("ControllerUnpublishVolume: detached", "volumeID", volumeID, "nodeID", nodeID)
 
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
@@ -1055,7 +1080,7 @@ func newCreateRaidVolumeResponse(disks []*cloud.Disk, totalSize int64, ctx map[s
 		I0131 12:49:54.834532       1 controller.go:464] "ControllerPublishVolume: called" args="volume_id:\"vol-05c64c0dd12b9de2d\" node_id:\"i-06db7953e8e31deae\" volume_capability:{mount:{fs_type:\"ext4\"} access_mode:{mode:SINGLE_NODE_WRITER}} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-0\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-0\"} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-1\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-1\"} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-2\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-2\"} volume_context:{key:\"amc.datastax.com/storage-raidtype\" value:\"raid0\"} volume_context:{key:\"amc.datastax.com/storage-volume-count\" value:\"3\"} volume_context:{key:\"amc.datastax.com/storage-volume-id\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef\"} volume_context:{key:\"amc.datastax.com/volume-id-0\" value:\"vol-05c64c0dd12b9de2d\"} volume_context:{key:\"amc.datastax.com/volume-id-1\" value:\"vol-0d487614ffc75dd3f\"} volume_context:{key:\"amc.datastax.com/volume-id-2\" value:\"vol-0b66f022259db7904\"} volume_context:{key:\"storage.kubernetes.io/csiProvisionerIdentity\" value:\"1738326725744-3557-ebs.csi.aws.com\"}"
 	*/
 
-	pvcName := ctx[RaidVolumeName]
+	pvcName := ctx[PVCVolumeName]
 	for i, disk := range disks {
 		ctx[fmt.Sprintf("%s-%d", RaidVolumeIDPrefix, i)] = disk.VolumeID
 	}

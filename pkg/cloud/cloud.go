@@ -1138,6 +1138,36 @@ func (c *cloud) GetDiskByName(ctx context.Context, name string, capacityBytes in
 	}, nil
 }
 
+func (c *cloud) GetDisksByName(ctx context.Context, name string) ([]*Disk, error) {
+	request := &ec2.DescribeVolumesInput{
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("tag:" + VolumeNameTagKey),
+				Values: []string{name},
+			},
+		},
+	}
+
+	volumes, err := c.getVolumes(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	disks := make([]*Disk, 0, len(volumes))
+	for _, volume := range volumes {
+		disk := &Disk{
+			VolumeID:         aws.ToString(volume.VolumeId),
+			CapacityGiB:      *volume.Size,
+			AvailabilityZone: aws.ToString(volume.AvailabilityZone),
+			SnapshotID:       aws.ToString(volume.SnapshotId),
+			OutpostArn:       aws.ToString(volume.OutpostArn),
+		}
+		disks = append(disks, disk)
+	}
+
+	return disks, nil
+}
+
 func (c *cloud) GetDiskByID(ctx context.Context, volumeID string) (*Disk, error) {
 	request := &ec2.DescribeVolumesInput{
 		VolumeIds: []string{volumeID},
@@ -1475,6 +1505,18 @@ func (c *cloud) getVolume(ctx context.Context, request *ec2.DescribeVolumesInput
 	} else {
 		return c.batchDescribeVolumes(request)
 	}
+}
+
+func (c *cloud) getVolumes(ctx context.Context, request *ec2.DescribeVolumesInput) ([]types.Volume, error) {
+	if c.bm == nil {
+		volumes, err := describeVolumes(ctx, c.ec2, request)
+		if err != nil {
+			return nil, err
+		}
+		return volumes, nil
+	}
+
+	return nil, errors.New("batched DescribeVolumes not supported")
 }
 
 func describeInstances(ctx context.Context, svc EC2API, request *ec2.DescribeInstancesInput) ([]types.Instance, error) {

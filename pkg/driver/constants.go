@@ -112,8 +112,8 @@ const (
 	// RaidStripeCountKey represents key for count of volumes to split the RAID into.
 	RaidStripeCountKey = "amc.datastax.com/storage-raid-volume-count"
 
-	// RaidVolumeName represents key for the name of the RAID volume. This could be equal to PVC name.
-	RaidVolumeName = "amc.datastax.com/storage-raid-volume-name"
+	// PVCVolumeName represents key for the name of the PVC (and LVM volumeGroup)
+	PVCVolumeName = "amc.datastax.com/storage-pvc-volume-name"
 
 	// RaidVolumeId is a key for the real backing volumeID of the RAID stripe.
 	RaidVolumeIDPrefix = "amc.datastax.com/storage-raid-volume-id"
