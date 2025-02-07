@@ -457,7 +457,7 @@ func (d *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 					klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", disk.VolumeID)
 					return &csi.DeleteVolumeResponse{}, nil
 				}
-				return nil, status.Errorf(codes.Internal, "Could not delete volume %q %q: %v", disk.VolumeID, err)
+				return nil, status.Errorf(codes.Internal, "Could not delete volume %q: %v", disk.VolumeID, err)
 			}
 		}
 	} else {
