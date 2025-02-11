@@ -596,10 +596,10 @@ func ScanVolumeGroups(ctx context.Context, devices []string) error {
 		"-y",
 	}
 
-	if len(devices) > 0 {
-		vgScanArsg = append(vgScanArsg, "--devices")
-		vgScanArsg = append(vgScanArsg, devices...)
-	}
+	// if len(devices) > 0 {
+	// 	vgScanArsg = append(vgScanArsg, "--devices")
+	// 	vgScanArsg = append(vgScanArsg, devices...)
+	// }
 
 	return callLVM(ctx, vgScanArsg...)
 }

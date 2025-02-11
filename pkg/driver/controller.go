@@ -363,8 +363,9 @@ func (d *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 			raidOpts := *opts
 			raidOpts.CapacityBytes = sizePerDisk
 			volumeTags[RaidStripeCountKey] = strconv.Itoa(int(raidVolumeCount))
+			volStripeName := fmt.Sprintf("%s-%d", volName, i)
 
-			disk, err := d.cloud.CreateDisk(ctx, volName, &raidOpts)
+			disk, err := d.cloud.CreateDisk(ctx, volStripeName, &raidOpts)
 			if err != nil {
 				var errCode codes.Code
 				switch {
@@ -441,6 +442,10 @@ func (d *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 
 	// TODO This only works if the PVC naming follows this syntax, fix this.
 	if strings.HasPrefix(volumeID, "pvc-") {
+		/*
+			I0211 16:49:24.006948       1 controller.go:580] "ControllerUnpublishVolume: detaching" volumeID="pvc-77e1afc7-1e98-46d1-80d4-e53a2c2fe54d" nodeID="i-0eab5248cfd0d346b"
+			E0211 16:49:24.006991       1 driver.go:108] "GRPC error" err="rpc error: code = Internal desc = Could not detach volume \"pvc-77e1afc7-1e98-46d1-80d4-e53a2c2fe54d\" from node \"i-0eab5248cfd0d346b\": batched DescribeVolumes not supported"
+		*/
 		// We need to detach all the volumes
 		disks, err := d.cloud.GetDisksByName(ctx, volumeID)
 		if err != nil {
@@ -510,15 +515,27 @@ func (d *ControllerService) ControllerPublishVolume(ctx context.Context, req *cs
 			diskVolumeId := req.VolumeContext[fmt.Sprintf("%s-%d", RaidVolumeIDPrefix, i)]
 			// raidVolumeName := fmt.Sprintf("%s-%d", volumeID, i)
 			klog.InfoS("Trying to attach raid disk: ", "volumeId", diskVolumeId, "index", i)
+			/*
+								I0211 16:52:07.504606       1 controller.go:382] "Created disk: " volumeId="vol-014b7901c98de3a46" volumeName="pvc-7ec6f83c-7611-460a-92b1-c84b7a80d511" volumeSizeInGiB=1
+								I0211 16:52:09.552962       1 controller.go:382] "Created disk: " volumeId="vol-086d2d26decd17e93" volumeName="pvc-7ec6f83c-7611-460a-92b1-c84b7a80d511" volumeSizeInGiB=1
+								I0211 16:52:11.619035       1 controller.go:382] "Created disk: " volumeId="vol-074e0f625fabb1255" volumeName="pvc-7ec6f83c-7611-460a-92b1-c84b7a80d511" volumeSizeInGiB=1
+				I0211 16:52:12.379400       1 controller.go:513] "Trying to attach raid disk: " volumeId="vol-014b7901c98de3a46" index=0
+				I0211 16:52:14.048310       1 controller.go:522] "Attached raid disk: " volumeId="vol-014b7901c98de3a46" index=0 devicePath="/dev/xvdab"
+				I0211 16:52:14.048338       1 controller.go:513] "Trying to attach raid disk: " volumeId="vol-086d2d26decd17e93" index=1
+				I0211 16:52:15.687662       1 controller.go:522] "Attached raid disk: " volumeId="vol-086d2d26decd17e93" index=1 devicePath="/dev/xvdac"
+				I0211 16:52:15.687687       1 controller.go:513] "Trying to attach raid disk: " volumeId="vol-074e0f625fabb1255" index=2
+				I0211 16:52:17.326307       1 controller.go:522] "Attached raid disk: " volumeId="vol-074e0f625fabb1255" index=2 devicePath="/dev/xvdad"
+			*/
 
-			if devicePath, err := d.cloud.AttachDisk(ctx, diskVolumeId, nodeID); err != nil {
+			if devicePathValue, err := d.cloud.AttachDisk(ctx, diskVolumeId, nodeID); err != nil {
 				if errors.Is(err, cloud.ErrNotFound) {
 					klog.InfoS("ControllerPublishVolume: volume not found", "volumeID", diskVolumeId, "nodeID", nodeID)
 					return nil, status.Errorf(codes.NotFound, "Volume %q not found", diskVolumeId)
 				}
 				return nil, status.Errorf(codes.Internal, "Could not attach volume %q to node %q: %v", diskVolumeId, nodeID, err)
 			} else {
-				devicePaths = append(devicePaths, devicePath)
+				klog.InfoS("Attached raid disk: ", "volumeId", diskVolumeId, "index", i, "devicePath", devicePathValue)
+				devicePaths = append(devicePaths, devicePathValue)
 			}
 		}
 		devicePath = strings.Join(devicePaths, ",")

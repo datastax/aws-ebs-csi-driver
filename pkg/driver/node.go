@@ -214,9 +214,21 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 			return nil, status.Errorf(codes.InvalidArgument, "Could not parse raidVolumeCount: %v", err)
 		}
 
-		devices := strings.Split(devicePath, ",")
+		devicePaths := strings.Split(devicePath, ",")
+		devices := make([]string, 0, len(devicePaths))
 
 		ctx := context.Background()
+
+		for i, device := range devicePaths {
+			// We need to find the real device path in case it's a NVME volume that was mounted from EBS
+			// Extract volumeId
+			realVolumeId := req.VolumeContext[fmt.Sprintf("%s-%d", RaidVolumeIDPrefix, i)]
+			source, err := d.mounter.FindDevicePath(device, realVolumeId, partition, d.metadata.GetRegion())
+			if err != nil {
+				return nil, status.Errorf(codes.NotFound, "Failed to find device path %s. %v", devicePath, err)
+			}
+			devices = append(devices, source)
+		}
 
 		// Scan for all existing volumes first
 		if err := command.ScanVolumeGroups(ctx, devices); err != nil {
