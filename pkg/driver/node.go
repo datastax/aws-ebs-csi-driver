@@ -236,7 +236,7 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		}
 
 		vg, err := command.FindVolumeGroup(ctx, volumeName)
-		if err != nil {
+		if err != nil && err != command.ErrNotFound {
 			return nil, status.Errorf(codes.Internal, "Could not search for volume group: %v", err)
 		}
 
@@ -255,17 +255,18 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 
 		// Now move to create the LV
 		lv, err := vg.FindVolume(ctx, lvGroupName)
-		if err != nil {
+		if err != nil && err != command.ErrNotFound {
 			return nil, status.Errorf(codes.Internal, "Could not search for logical volume: %v", err)
 		}
 
 		if lv == nil {
-			stripeSize := "4" // TODO This is now 4kB stripeSize, do we wish to increase this to 64kB?
-			volSizeBytes, err := strconv.Atoi(req.GetVolumeContext()[RaidVolumeSize])
-			if err != nil {
-				return nil, status.Errorf(codes.InvalidArgument, "Could not parse volume size: %v", err)
-			}
-			if err := vg.CreateVolume(ctx, lvGroupName, uint64(volSizeBytes), []string{}, uint(raidVolumeCount), stripeSize, nil); err != nil {
+			stripeSize := "4"         // TODO This is now 4kB stripeSize, do we wish to increase this to 64kB?
+			volSizeBytes := uint64(0) // Our LVM driver makes this to use 100% of the VG size
+			// volSizeBytes, err := strconv.Atoi(req.GetVolumeContext()[RaidVolumeSize])
+			// if err != nil {
+			// 	return nil, status.Errorf(codes.InvalidArgument, "Could not parse volume size: %v", err)
+			// }
+			if err := vg.CreateVolume(ctx, lvGroupName, volSizeBytes, []string{}, uint(raidVolumeCount), stripeSize, nil); err != nil {
 				return nil, status.Errorf(codes.Internal, "Could not create logical volume: %v", err)
 			}
 		}

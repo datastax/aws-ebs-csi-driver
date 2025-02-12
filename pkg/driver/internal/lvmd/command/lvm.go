@@ -208,7 +208,12 @@ func (vg *VolumeGroup) CreateVolume(ctx context.Context, name string, size uint6
 		return ErrNoMultipleOfSectorSize
 	}
 
-	lvcreateArgs := []string{"lvcreate", "-n", name, "-L", fmt.Sprintf("%vb", size), "-W", "y", "-y"}
+	lvcreateArgs := []string{"lvcreate", "-n", name, "-W", "y", "-y"}
+	if size > 0 {
+		lvcreateArgs = append(lvcreateArgs, "-L", fmt.Sprintf("%vb", size))
+	} else {
+		lvcreateArgs = append(lvcreateArgs, "-l", "100%FREE")
+	}
 	for _, tag := range tags {
 		lvcreateArgs = append(lvcreateArgs, "--addtag")
 		lvcreateArgs = append(lvcreateArgs, tag)
