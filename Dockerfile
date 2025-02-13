@@ -28,12 +28,10 @@ ARG VERSION
 ARG GOEXPERIMENT
 RUN --mount=type=cache,target=/gomodcache --mount=type=cache,target=/gocache OS=$TARGETOS ARCH=$TARGETARCH make
 
-FROM redhat/ubi9-minimal:latest AS linux-ubi9
-COPY --from=builder /go/src/github.com/kubernetes-sigs/aws-ebs-csi-driver/bin/aws-ebs-csi-driver /bin/aws-ebs-csi-driver
-RUN microdnf update -y && microdnf install -y lvm2 libudev-devel
-ENTRYPOINT ["/bin/aws-ebs-csi-driver"]
+FROM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-nsenter-builder:latest-al23 AS linux-nsenter
 
 FROM public.ecr.aws/eks-distro-build-tooling/eks-distro-minimal-base-csi-ebs:latest-al23 AS linux-al2023
+COPY --from=linux-nsenter /newroot/usr/bin/nsenter /usr/bin
 COPY --from=builder /go/src/github.com/kubernetes-sigs/aws-ebs-csi-driver/bin/aws-ebs-csi-driver /bin/aws-ebs-csi-driver
 ENTRYPOINT ["/bin/aws-ebs-csi-driver"]
 

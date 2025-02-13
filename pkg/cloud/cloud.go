@@ -1508,15 +1508,11 @@ func (c *cloud) getVolume(ctx context.Context, request *ec2.DescribeVolumesInput
 }
 
 func (c *cloud) getVolumes(ctx context.Context, request *ec2.DescribeVolumesInput) ([]types.Volume, error) {
-	if c.bm == nil {
-		volumes, err := describeVolumes(ctx, c.ec2, request)
-		if err != nil {
-			return nil, err
-		}
-		return volumes, nil
+	volumes, err := describeVolumes(ctx, c.ec2, request)
+	if err != nil {
+		return nil, err
 	}
-
-	return nil, errors.New("batched DescribeVolumes not supported")
+	return volumes, nil
 }
 
 func describeInstances(ctx context.Context, svc EC2API, request *ec2.DescribeInstancesInput) ([]types.Instance, error) {

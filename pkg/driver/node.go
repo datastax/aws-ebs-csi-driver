@@ -565,6 +565,10 @@ func (d *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		d.inFlight.Delete(volumeID)
 	}()
 
+	/*
+		TODO Is this LVM mount? If so, do something to it before Unpublishing
+	*/
+
 	klog.V(4).InfoS("NodeUnpublishVolume: unmounting", "target", target)
 	err := d.mounter.Unpublish(target)
 	if err != nil {

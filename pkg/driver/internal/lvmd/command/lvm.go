@@ -591,8 +591,16 @@ func (l *LogicalVolume) Rename(ctx context.Context, name string) error {
 
 // Not part of TopoLVM
 
+func (l *LogicalVolume) Deactivate(ctx context.Context) error {
+	return callLVM(ctx, "lvchange", "-a", "n", l.fullname)
+}
+
 func (v *VolumeGroup) Activate(ctx context.Context) error {
 	return callLVM(ctx, "vgchange", "-a", "y", v.Name())
+}
+
+func (v *VolumeGroup) Deactivate(ctx context.Context) error {
+	return callLVM(ctx, "vgchange", "-a", "n", v.Name())
 }
 
 func ScanVolumeGroups(ctx context.Context, devices []string) error {

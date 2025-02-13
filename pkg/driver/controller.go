@@ -354,6 +354,8 @@ func (d *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if raidType == RaidType0 {
 		sizePerDisk := calculateRaid0StripeSize(volSizeBytes, raidVolumeCount)
 		disks := make([]*cloud.Disk, 0, raidVolumeCount)
+		klog.InfoS("Creating RAID 0 volume", "stripes", raidVolumeCount, "sizePerDisk", sizePerDisk, "volName", volName)
+
 		responseCtx[RaidStripeCountKey] = strconv.Itoa(int(raidVolumeCount))
 		responseCtx[RaidTypeKey] = raidType
 		responseCtx[PVCVolumeName] = volName
@@ -446,6 +448,24 @@ func (d *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 			I0211 16:49:24.006948       1 controller.go:580] "ControllerUnpublishVolume: detaching" volumeID="pvc-77e1afc7-1e98-46d1-80d4-e53a2c2fe54d" nodeID="i-0eab5248cfd0d346b"
 			E0211 16:49:24.006991       1 driver.go:108] "GRPC error" err="rpc error: code = Internal desc = Could not detach volume \"pvc-77e1afc7-1e98-46d1-80d4-e53a2c2fe54d\" from node \"i-0eab5248cfd0d346b\": batched DescribeVolumes not supported"
 		*/
+
+		/*
+			Pod delete:
+
+			I0213 16:22:25.257290       1 controller.go:597] "ControllerUnpublishVolume: detaching" volumeID="pvc-00822178-a99d-40eb-a030-0f5699f1dbff" nodeID="i-08ae874092d518e71"
+			I0213 16:22:25.257313       1 controller.go:602] Detected raid volume in ControllerUnpublishVolumevolumeIDpvc-00822178-a99d-40eb-a030-0f5699f1dbff
+			I0213 16:22:25.433799       1 controller.go:614] Detaching raid diskpvcNamepvc-00822178-a99d-40eb-a030-0f5699f1dbffvolumeIDvol-02c0c02eedd521a29
+			I0213 16:22:27.013044       1 cloud.go:1105] "Waiting for volume state" volumeID="vol-02c0c02eedd521a29" actual="detaching" desired="detached"
+			I0213 16:22:28.586499       1 cloud.go:1105] "Waiting for volume state" volumeID="vol-02c0c02eedd521a29" actual="detaching" desired="detached"
+			I0213 16:22:31.007658       1 controller.go:614] Detaching raid diskpvcNamepvc-00822178-a99d-40eb-a030-0f5699f1dbffvolumeIDvol-0df35f69b03be992f
+			I0213 16:22:32.676736       1 cloud.go:1105] "Waiting for volume state" volumeID="vol-0df35f69b03be992f" actual="detaching" desired="detached"
+			I0213 16:22:34.243113       1 cloud.go:1105] "Waiting for volume state" volumeID="vol-0df35f69b03be992f" actual="detaching" desired="detached"
+			I0213 16:22:36.652988       1 controller.go:614] Detaching raid diskpvcNamepvc-00822178-a99d-40eb-a030-0f5699f1dbffvolumeIDvol-08c39437c59921fa0
+			I0213 16:22:38.175867       1 cloud.go:1105] "Waiting for volume state" volumeID="vol-08c39437c59921fa0" actual="detaching" desired="detached"
+			I0213 16:22:39.748139       1 cloud.go:1105] "Waiting for volume state" volumeID="vol-08c39437c59921fa0" actual="detaching" desired="detached"
+			I0213 16:22:42.148879       1 controller.go:633] "ControllerUnpublishVolume: detached" volumeID="pvc-00822178-a99d-40eb-a030-0f5699f1dbff" nodeID="i-08ae874092d518e71"
+		*/
+
 		// We need to detach all the volumes
 		disks, err := d.cloud.GetDisksByName(ctx, volumeID)
 		if err != nil {
@@ -595,7 +615,9 @@ func (d *ControllerService) ControllerUnpublishVolume(ctx context.Context, req *
 	klog.V(2).InfoS("ControllerUnpublishVolume: detaching", "volumeID", volumeID, "nodeID", nodeID)
 
 	// TODO This only works if the PVC naming follows this syntax, fix this.
+	// We could fetch by tags also, or check the existing VG group if we have this name..
 	if strings.HasPrefix(volumeID, "pvc-") {
+		klog.InfoS("Detected raid volume in ControllerUnpublishVolume", "volumeID", volumeID)
 		// We need to detach all the volumes
 		disks, err := d.cloud.GetDisksByName(ctx, volumeID)
 		if err != nil {
@@ -603,10 +625,11 @@ func (d *ControllerService) ControllerUnpublishVolume(ctx context.Context, req *
 				klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", volumeID, "nodeID", nodeID)
 				return &csi.ControllerUnpublishVolumeResponse{}, nil
 			}
-			return nil, status.Errorf(codes.Internal, "Could not detach volume %q from node %q: %v", volumeID, nodeID, err)
+			return nil, status.Errorf(codes.Internal, "Could not get disks for volume %q: %v", volumeID, err)
 		}
 
 		for _, disk := range disks {
+			klog.InfoS("Detaching raid disk", "pvcName", volumeID, "volumeID", disk.VolumeID)
 			if err := d.cloud.DetachDisk(ctx, disk.VolumeID, nodeID); err != nil {
 				if errors.Is(err, cloud.ErrNotFound) {
 					klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", disk.VolumeID, "nodeID", nodeID)
@@ -1092,11 +1115,6 @@ func newCreateRaidVolumeResponse(disks []*cloud.Disk, totalSize int64, ctx map[s
 		segments[AwsOutpostIDKey] = strings.ReplaceAll(arn.Resource, "outpost/", "")
 	}
 
-	/*
-		I0131 12:49:53.955465       1 controller.go:1081] "Returning CreateVolumeResponse" response="volume:{capacity_bytes:3221225472 volume_id:\"vol-05c64c0dd12b9de2d\" volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-0\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-0\"} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-1\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-1\"} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-2\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-2\"} volume_context:{key:\"amc.datastax.com/storage-raidtype\" value:\"raid0\"} volume_context:{key:\"amc.datastax.com/storage-volume-count\" value:\"3\"} volume_context:{key:\"amc.datastax.com/storage-volume-id\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef\"} volume_context:{key:\"amc.datastax.com/volume-id-0\" value:\"vol-05c64c0dd12b9de2d\"} volume_context:{key:\"amc.datastax.com/volume-id-1\" value:\"vol-0d487614ffc75dd3f\"} volume_context:{key:\"amc.datastax.com/volume-id-2\" value:\"vol-0b66f022259db7904\"} accessible_topology:{segments:{key:\"topology.kubernetes.io/zone\" value:\"us-east-2c\"}}}"
-		I0131 12:49:54.834532       1 controller.go:464] "ControllerPublishVolume: called" args="volume_id:\"vol-05c64c0dd12b9de2d\" node_id:\"i-06db7953e8e31deae\" volume_capability:{mount:{fs_type:\"ext4\"} access_mode:{mode:SINGLE_NODE_WRITER}} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-0\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-0\"} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-1\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-1\"} volume_context:{key:\"amc.datastax.com/raid-volume-name-pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-2\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef-2\"} volume_context:{key:\"amc.datastax.com/storage-raidtype\" value:\"raid0\"} volume_context:{key:\"amc.datastax.com/storage-volume-count\" value:\"3\"} volume_context:{key:\"amc.datastax.com/storage-volume-id\" value:\"pvc-c3e2e658-0d70-4d94-ac21-22a87efa5aef\"} volume_context:{key:\"amc.datastax.com/volume-id-0\" value:\"vol-05c64c0dd12b9de2d\"} volume_context:{key:\"amc.datastax.com/volume-id-1\" value:\"vol-0d487614ffc75dd3f\"} volume_context:{key:\"amc.datastax.com/volume-id-2\" value:\"vol-0b66f022259db7904\"} volume_context:{key:\"storage.kubernetes.io/csiProvisionerIdentity\" value:\"1738326725744-3557-ebs.csi.aws.com\"}"
-	*/
-
 	pvcName := ctx[PVCVolumeName]
 	for i, disk := range disks {
 		ctx[fmt.Sprintf("%s-%d", RaidVolumeIDPrefix, i)] = disk.VolumeID
@@ -1114,8 +1132,6 @@ func newCreateRaidVolumeResponse(disks []*cloud.Disk, totalSize int64, ctx map[s
 			},
 		},
 	}
-
-	klog.InfoS("Returning CreateVolumeResponse", "response", res)
 
 	return res
 }
