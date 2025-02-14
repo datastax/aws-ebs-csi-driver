@@ -205,7 +205,7 @@ func (d *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 				return nil, status.Errorf(codes.InvalidArgument, "Could not parse raidTypeKey (%s): %v", value, err)
 			}
 			raidType = value
-		case RaidStripeCountKey:
+		case LVMStripeCountKey:
 			raidVolumeCountKey, err := strconv.ParseInt(value, 10, 32)
 			if err != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "Could not parse raidVolumesKey: %v", err)
@@ -356,15 +356,15 @@ func (d *ControllerService) CreateVolume(ctx context.Context, req *csi.CreateVol
 		disks := make([]*cloud.Disk, 0, raidVolumeCount)
 		klog.InfoS("Creating RAID 0 volume", "stripes", raidVolumeCount, "sizePerDisk", sizePerDisk, "volName", volName)
 
-		responseCtx[RaidStripeCountKey] = strconv.Itoa(int(raidVolumeCount))
+		responseCtx[LVMStripeCountKey] = strconv.Itoa(int(raidVolumeCount))
 		responseCtx[RaidTypeKey] = raidType
 		responseCtx[PVCVolumeName] = volName
-		responseCtx[RaidVolumeSize] = strconv.FormatInt(volSizeBytes, 10)
+		responseCtx[LVMVolumeSize] = strconv.FormatInt(volSizeBytes, 10)
 
 		for i := int32(0); i < raidVolumeCount; i++ {
 			raidOpts := *opts
 			raidOpts.CapacityBytes = sizePerDisk
-			volumeTags[RaidStripeCountKey] = strconv.Itoa(int(raidVolumeCount))
+			volumeTags[LVMStripeCountKey] = strconv.Itoa(int(raidVolumeCount))
 			volStripeName := fmt.Sprintf("%s-%d", volName, i)
 
 			disk, err := d.cloud.CreateDisk(ctx, volStripeName, &raidOpts)
@@ -523,7 +523,7 @@ func (d *ControllerService) ControllerPublishVolume(ctx context.Context, req *cs
 
 	devicePath := ""
 	if _, exists := req.VolumeContext[RaidTypeKey]; exists {
-		raidVolumeCount, err := strconv.Atoi(req.VolumeContext[RaidStripeCountKey])
+		raidVolumeCount, err := strconv.Atoi(req.VolumeContext[LVMStripeCountKey])
 		klog.InfoS("ControllerPublishVolume: raid volume detected", "volumeID", volumeID, "nodeID", nodeID, "raidVolumeCount", raidVolumeCount)
 		// We need to attach all the volumes
 		if err != nil {
@@ -532,7 +532,7 @@ func (d *ControllerService) ControllerPublishVolume(ctx context.Context, req *cs
 
 		devicePaths := make([]string, 0, raidVolumeCount)
 		for i := 0; i < raidVolumeCount; i++ {
-			diskVolumeId := req.VolumeContext[fmt.Sprintf("%s-%d", RaidVolumeIDPrefix, i)]
+			diskVolumeId := req.VolumeContext[fmt.Sprintf("%s-%d", LVMVolumeIDPrefix, i)]
 			// raidVolumeName := fmt.Sprintf("%s-%d", volumeID, i)
 			klog.InfoS("Trying to attach raid disk: ", "volumeId", diskVolumeId, "index", i)
 			/*
@@ -573,7 +573,7 @@ func (d *ControllerService) ControllerPublishVolume(ctx context.Context, req *cs
 
 	klog.InfoS("ControllerPublishVolume: attached", "volumeID", volumeID, "nodeID", nodeID, "devicePath", devicePath)
 
-	pvInfo := map[string]string{DevicePathKey: devicePath, RaidStripeCountKey: req.VolumeContext[RaidStripeCountKey], RaidTypeKey: req.VolumeContext[RaidTypeKey]}
+	pvInfo := map[string]string{DevicePathKey: devicePath, LVMStripeCountKey: req.VolumeContext[LVMStripeCountKey], RaidTypeKey: req.VolumeContext[RaidTypeKey]}
 	return &csi.ControllerPublishVolumeResponse{PublishContext: pvInfo}, nil
 }
 
@@ -1117,7 +1117,7 @@ func newCreateRaidVolumeResponse(disks []*cloud.Disk, totalSize int64, ctx map[s
 
 	pvcName := ctx[PVCVolumeName]
 	for i, disk := range disks {
-		ctx[fmt.Sprintf("%s-%d", RaidVolumeIDPrefix, i)] = disk.VolumeID
+		ctx[fmt.Sprintf("%s-%d", LVMVolumeIDPrefix, i)] = disk.VolumeID
 	}
 
 	res := &csi.CreateVolumeResponse{

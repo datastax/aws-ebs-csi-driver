@@ -207,7 +207,7 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 
 	// TODO Verify here if this is part of the RAID, split the DevicePath to individual devices and build a LVM (or reload existing)
 	if _, exists := req.VolumeContext[RaidTypeKey]; exists {
-		raidVolumeCount, err := strconv.Atoi(req.VolumeContext[RaidStripeCountKey])
+		raidVolumeCount, err := strconv.Atoi(req.VolumeContext[LVMStripeCountKey])
 		volumeName := volumeContext[PVCVolumeName]
 		klog.InfoS("NodeStageVolume: raid volume detected", "volumeID", volumeID, "targetStagingPath", target, "raidVolumeCount", raidVolumeCount)
 		if err != nil {
@@ -222,7 +222,7 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		for i, device := range devicePaths {
 			// We need to find the real device path in case it's a NVME volume that was mounted from EBS
 			// Extract volumeId
-			realVolumeId := req.VolumeContext[fmt.Sprintf("%s-%d", RaidVolumeIDPrefix, i)]
+			realVolumeId := req.VolumeContext[fmt.Sprintf("%s-%d", LVMVolumeIDPrefix, i)]
 			source, err := d.mounter.FindDevicePath(device, realVolumeId, partition, d.metadata.GetRegion())
 			if err != nil {
 				return nil, status.Errorf(codes.NotFound, "Failed to find device path %s. %v", devicePath, err)
@@ -260,18 +260,23 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 		}
 
 		if lv == nil {
-			stripeSize := "4"         // TODO This is now 4kB stripeSize, do we wish to increase this to 64kB?
+			stripeSize := "4" // TODO This is now 4kB stripeSize, do we wish to increase this to 64kB?
+			if stripeSizeSet, ok := req.VolumeContext[LVMStripeSizeKey]; ok {
+				stripeSize = stripeSizeSet
+			}
+
 			volSizeBytes := uint64(0) // Our LVM driver makes this to use 100% of the VG size
-			// volSizeBytes, err := strconv.Atoi(req.GetVolumeContext()[RaidVolumeSize])
-			// if err != nil {
-			// 	return nil, status.Errorf(codes.InvalidArgument, "Could not parse volume size: %v", err)
-			// }
 			if err := vg.CreateVolume(ctx, lvGroupName, volSizeBytes, []string{}, uint(raidVolumeCount), stripeSize, nil); err != nil {
 				return nil, status.Errorf(codes.Internal, "Could not create logical volume: %v", err)
 			}
 		}
 
-		if err := lv.Activate(ctx, "rw"); err != nil {
+		lvArgs := []string{}
+		if readAhead, ok := req.VolumeContext[LVMReadAheadKey]; ok {
+			lvArgs = append(lvArgs, "--readahead", readAhead)
+		}
+
+		if err := lv.Activate(ctx, "rw", lvArgs...); err != nil {
 			return nil, status.Errorf(codes.Internal, "Could not activate logical volume: %v", err)
 		}
 
@@ -379,7 +384,7 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 const lvGroupName = "server-data"
 
 func (d *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
-	klog.V(4).InfoS("NodeUnstageVolume: called", "args", req)
+	klog.InfoS("NodeUnstageVolume: called", "args", req)
 	volumeID := req.GetVolumeId()
 	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
@@ -424,6 +429,30 @@ func (d *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "Could not unmount target %q: %v", target, err)
 	}
+
+	// Check if the device was a LVM volume and deactivate the LV and the VG
+	vg, err := command.FindVolumeGroup(ctx, volumeID)
+	if err != nil && err != command.ErrNotFound {
+		return nil, status.Errorf(codes.Internal, "Could not search for volume group: %v", err)
+	}
+
+	if vg != nil {
+		lv, err := vg.FindVolume(ctx, lvGroupName)
+		if err != nil && err != command.ErrNotFound {
+			return nil, status.Errorf(codes.Internal, "Could not search for logical volume: %v", err)
+		}
+
+		if lv != nil {
+			if err := lv.Deactivate(ctx); err != nil {
+				return nil, status.Errorf(codes.Internal, "Could not deactivate logical volume: %v", err)
+			}
+		}
+
+		if err := vg.Deactivate(ctx); err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not deactivate volume group: %v", err)
+		}
+	}
+
 	klog.V(4).InfoS("NodeUnStageVolume: successfully unstaged volume", "volumeID", volumeID, "target", target)
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
@@ -545,7 +574,7 @@ func (d *NodeService) NodePublishVolume(ctx context.Context, req *csi.NodePublis
 }
 
 func (d *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
-	klog.V(4).InfoS("NodeUnpublishVolume: called", "args", util.SanitizeRequest(req))
+	klog.InfoS("NodeUnpublishVolume: called", "args", util.SanitizeRequest(req))
 	volumeID := req.GetVolumeId()
 	if len(volumeID) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID not provided")
@@ -564,10 +593,6 @@ func (d *NodeService) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpu
 		klog.V(4).InfoS("NodeUnPublishVolume: volume operation finished", "volumeId", volumeID)
 		d.inFlight.Delete(volumeID)
 	}()
-
-	/*
-		TODO Is this LVM mount? If so, do something to it before Unpublishing
-	*/
 
 	klog.V(4).InfoS("NodeUnpublishVolume: unmounting", "target", target)
 	err := d.mounter.Unpublish(target)

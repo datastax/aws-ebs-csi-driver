@@ -529,7 +529,7 @@ func (l *LogicalVolume) ThinSnapshot(ctx context.Context, name string, tags []st
 }
 
 // Activate activates the logical volume for desired access.
-func (l *LogicalVolume) Activate(ctx context.Context, access string) error {
+func (l *LogicalVolume) Activate(ctx context.Context, access string, lvArgs ...string) error {
 	var lvchangeArgs []string
 	switch access {
 	case "ro":
@@ -539,6 +539,7 @@ func (l *LogicalVolume) Activate(ctx context.Context, access string) error {
 	default:
 		return fmt.Errorf("unknown access: %s for LogicalVolume %s", access, l.fullname)
 	}
+	lvchangeArgs = append(lvchangeArgs, lvArgs...)
 
 	return callLVM(ctx, lvchangeArgs...)
 }

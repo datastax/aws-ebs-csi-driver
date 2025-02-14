@@ -109,17 +109,23 @@ const (
 	// RaidTypeKey represents key for RAID type.
 	RaidTypeKey = "amc.datastax.com/storage-raidtype"
 
-	// RaidStripeCountKey represents key for count of volumes to split the RAID into.
-	RaidStripeCountKey = "amc.datastax.com/storage-raid-volume-count"
+	// LVMStripeCountKey represents key for count of volumes to split the RAID into.
+	LVMStripeCountKey = "amc.datastax.com/storage-lvm-stripe-count"
 
 	// PVCVolumeName represents key for the name of the PVC (and LVM volumeGroup)
 	PVCVolumeName = "amc.datastax.com/storage-pvc-volume-name"
 
 	// RaidVolumeId is a key for the real backing volumeID of the RAID stripe.
-	RaidVolumeIDPrefix = "amc.datastax.com/storage-raid-volume-id"
+	LVMVolumeIDPrefix = "amc.datastax.com/storage-lvm-volume-id"
 
-	// RaidVolumeSize is a key for the size of the RAID stripe.
-	RaidVolumeSize = "amc.datastax.com/storage-raid-volume-size"
+	// LVMVolumeSize is a key for the size of the RAID stripe.
+	LVMVolumeSize = "amc.datastax.com/storage-lvm-volume-size"
+
+	// LVMStripeSizeKey represents key for size of each stripe block
+	LVMStripeSizeKey = "amc.datastax.com/storage-lvm-stripe-size"
+
+	// LVMReadAheadKey represents key for read ahead size
+	LVMReadAheadKey = "amc.datastax.com/storage-lvm-read-ahead"
 
 	/*
 		TODO Do we wish to separate two different approaches, to allow LVM growth? Such as:
