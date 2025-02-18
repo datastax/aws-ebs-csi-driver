@@ -43,6 +43,7 @@ spec:
         {{- with .Values.node.nodeSelector }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+      hostPID: {{ .Values.node.hostPID }}
       serviceAccountName: {{ .Values.node.serviceAccount.name }}
       terminationGracePeriodSeconds: {{ .Values.node.terminationGracePeriodSeconds }}
       priorityClassName: {{ .Values.node.priorityClassName | default "system-node-critical" }}
