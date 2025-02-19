@@ -240,6 +240,10 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 			return nil, status.Errorf(codes.Internal, "Could not search for volume group: %v", err)
 		}
 
+		if vg != nil {
+			klog.InfoS("NodeStageVolume: volume group already exists", "volumeID", volumeID, "volumeName", volumeName)
+		}
+
 		if vg == nil {
 			// Create a new VG
 			var err error
@@ -268,6 +272,11 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 			volSizeBytes := uint64(0) // Our LVM driver makes this to use 100% of the VG size
 			if err := vg.CreateVolume(ctx, lvGroupName, volSizeBytes, []string{}, uint(raidVolumeCount), stripeSize, nil); err != nil {
 				return nil, status.Errorf(codes.Internal, "Could not create logical volume: %v", err)
+			}
+
+			lv, err = vg.FindVolume(ctx, lvGroupName)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "Could not search for logical volume we just created: %v", err)
 			}
 		}
 
