@@ -128,7 +128,7 @@ const (
 	// AWSTagKeyPrefix is the prefix of the key value that is reserved for AWS.
 	AWSTagKeyPrefix = "aws:"
 	// AwsEbsDriverTagKey is the tag to identify if a volume/snapshot is managed by ebs csi driver.
-	AwsEbsDriverTagKey = "ebs.csi.aws.com/cluster"
+	AwsEbsDriverTagKey = "amc.ebs.csi.aws.com/cluster"
 )
 
 // Batcher.

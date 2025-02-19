@@ -16,7 +16,7 @@ apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
   name: ebs-sc
-provisioner: ebs.csi.aws.com
+provisioner: amc.ebs.csi.aws.com
 volumeBindingMode: WaitForFirstConsumer
 parameters:
   csi.storage.k8s.io/fstype: xfs

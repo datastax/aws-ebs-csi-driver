@@ -23,7 +23,7 @@ VolumeAttributesClass:
 SnapshotClass:
   FromName: true
 DriverInfo:
-  Name: ebs.csi.aws.com
+  Name: amc.ebs.csi.aws.com
   SupportedSizeRange:
     Min: 1Gi
     Max: 16Ti
@@ -34,7 +34,7 @@ DriverInfo:
     ntfs: {}
   SupportedMountOption:
     dirsync: {}
-  TopologyKeys: ["topology.ebs.csi.aws.com/zone"]
+  TopologyKeys: ["topology.amc.ebs.csi.aws.com/zone"]
   Capabilities:
     persistence: true
     fsGroup: true

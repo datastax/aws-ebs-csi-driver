@@ -57,7 +57,7 @@ func (modifyVolumeTest *ModifyVolumeTest) Run(c clientset.Interface, ns *v1.Name
 	testVolume, _ := volumeDetails.SetupDynamicPersistentVolumeClaim(c, ns, ebsDriver)
 	defer testVolume.Cleanup()
 
-	parametersWithPrefix := PrefixAnnotations("ebs.csi.aws.com/", modifyVolumeTest.ModifyVolumeParameters)
+	parametersWithPrefix := PrefixAnnotations("amc.ebs.csi.aws.com/", modifyVolumeTest.ModifyVolumeParameters)
 
 	By("deploying pod continuously writing to volume")
 	formatOptionMountPod := createPodWithVolume(c, ns, PodCmdContinuousWrite(DefaultMountPath), testVolume, volumeDetails)
@@ -79,7 +79,7 @@ func (modifyVolumeTest *ModifyVolumeTest) Run(c clientset.Interface, ns *v1.Name
 				Name:      formatOptionMountPod.pod.Name,
 				Namespace: ns.Name,
 			},
-			DriverName: "ebs.csi.aws.com",
+			DriverName: "amc.ebs.csi.aws.com",
 			Parameters: modifyVolumeTest.ModifyVolumeParameters,
 		}, metav1.CreateOptions{})
 		framework.ExpectNoError(err)

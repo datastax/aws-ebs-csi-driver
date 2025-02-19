@@ -34,7 +34,7 @@ spec:
     namespace: default 
   source:
     snapshotHandle: snap-0fba4d7649d765c50
-  driver: ebs.csi.aws.com
+  driver: amc.ebs.csi.aws.com
   deletionPolicy: Delete
   volumeSnapshotClassName: csi-aws-vsc
 ```

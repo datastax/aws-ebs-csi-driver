@@ -16,6 +16,6 @@ apiVersion: storage.k8s.io/v1beta1
 kind: VolumeAttributesClass
 metadata:
   name: gp2-class
-driverName: ebs.csi.aws.com
+driverName: amc.ebs.csi.aws.com
 parameters:
   type: gp2

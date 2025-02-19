@@ -211,7 +211,7 @@ const (
 // constants for node k8s API use.
 const (
 	// AgentNotReadyNodeTaintKey contains the key of taints to be removed on driver startup.
-	AgentNotReadyNodeTaintKey = "ebs.csi.aws.com/agent-not-ready"
+	AgentNotReadyNodeTaintKey = "amc.ebs.csi.aws.com/agent-not-ready"
 )
 
 type fileSystemConfig struct {

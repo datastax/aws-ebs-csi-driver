@@ -169,7 +169,7 @@ func (t *TestVolumeSnapshotClass) CreateStaticVolumeSnapshotContent(snapshotID s
 				Name:      volumeSnapshotNameStatic,
 				Namespace: t.namespace.Name,
 			},
-			Driver: "ebs.csi.aws.com",
+			Driver: "amc.ebs.csi.aws.com",
 			Source: volumesnapshotv1.VolumeSnapshotContentSource{
 				SnapshotHandle: aws.String(snapshotID),
 			},
@@ -366,14 +366,14 @@ func (t *TestPersistentVolumeClaim) ValidateProvisionedPersistentVolume() {
 		}
 		if len(t.storageClass.AllowedTopologies) > 0 {
 			// Since we're chaging our topology key, assume we have the values below to compare:
-			// NodeSelectorTerms: [{[{topology.ebs.csi.aws.com/zone In [us-west-2a]} {topology.kubernetes.io/zone In [us-west-2a]}] []}]
-			// AllowedTopologies: [{[{topology.ebs.csi.aws.com/zone [us-west-2a us-west-2b us-west-2c]}]}]
+			// NodeSelectorTerms: [{[{topology.amc.ebs.csi.aws.com/zone In [us-west-2a]} {topology.kubernetes.io/zone In [us-west-2a]}] []}]
+			// AllowedTopologies: [{[{topology.amc.ebs.csi.aws.com/zone [us-west-2a us-west-2b us-west-2c]}]}]
 			// As you can see tests might fail depending on the ordering of the NodeSelectorTerms. That's why we're doing this "hack".
 			// This is a quick fix to unblock the PRs we have. We really need to improve this. TODO
 
 			keyFound := false
 			for _, v := range t.persistentVolume.Spec.NodeAffinity.Required.NodeSelectorTerms[0].MatchExpressions {
-				if v.Key == "topology.ebs.csi.aws.com/zone" {
+				if v.Key == "topology.amc.ebs.csi.aws.com/zone" {
 					keyFound = true
 					Expect(v.Key).To(Equal(t.storageClass.AllowedTopologies[0].MatchLabelExpressions[0].Key))
 				}

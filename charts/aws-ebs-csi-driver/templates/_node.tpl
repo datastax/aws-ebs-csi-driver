@@ -79,7 +79,7 @@ spec:
             - --http-endpoint=0.0.0.0:3302
             {{- end}}
             {{- with .Values.node.kubeletPath }}
-            - --csi-mount-point-prefix={{ . }}/plugins/kubernetes.io/csi/ebs.csi.aws.com/
+            - --csi-mount-point-prefix={{ . }}/plugins/kubernetes.io/csi/amc.ebs.csi.aws.com/
             {{- end}}
             {{- with .Values.node.volumeAttachLimit }}
             - --volume-attach-limit={{ . }}
@@ -181,7 +181,7 @@ spec:
             - name: ADDRESS
               value: /csi/csi.sock
             - name: DRIVER_REG_SOCK_PATH
-              value: {{ printf "%s/plugins/ebs.csi.aws.com/csi.sock" (trimSuffix "/" .Values.node.kubeletPath) }}
+              value: {{ printf "%s/plugins/amc.ebs.csi.aws.com/csi.sock" (trimSuffix "/" .Values.node.kubeletPath) }}
             {{- if .Values.proxy.http_proxy }}
             {{- include "aws-ebs-csi-driver.http-proxy" . | nindent 12 }}
             {{- end }}
@@ -202,7 +202,7 @@ spec:
             - name: registration-dir
               mountPath: /registration
             - name: probe-dir
-              mountPath: {{ printf "%s/plugins/ebs.csi.aws.com/" (trimSuffix "/" .Values.node.kubeletPath) }}
+              mountPath: {{ printf "%s/plugins/amc.ebs.csi.aws.com/" (trimSuffix "/" .Values.node.kubeletPath) }}
           {{- with default .Values.node.resources .Values.sidecars.nodeDriverRegistrar.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -247,7 +247,7 @@ spec:
             type: Directory
         - name: plugin-dir
           hostPath:
-            path: {{ printf "%s/plugins/ebs.csi.aws.com/" (trimSuffix "/" .Values.node.kubeletPath) }}
+            path: {{ printf "%s/plugins/amc.ebs.csi.aws.com/" (trimSuffix "/" .Values.node.kubeletPath) }}
             type: DirectoryOrCreate
         - name: registration-dir
           hostPath:

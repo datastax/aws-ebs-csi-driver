@@ -341,7 +341,7 @@ The new sidecar tags are:
 
 **Important Notice:** This version updates the `CSIDriver` object in order to fix [a bug with static volumes and the `fsGroup` parameter](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/issues/1365). This upgrade will fail on existing clusters because the associated field in `CSIDriver` is immutable.
 
-Users upgrading to this version should pre-delete the existing `CSIDriver` object (example: `kubectl delete csidriver ebs.csi.aws.com`). This will not affect any existing volumes, but will cause the EBS CSI Driver to be unavailable to handle future requests, and should be immediately followed by an upgrade. For users that cannot delete the `CSIDriver` object, v2.11.1 implements a new parameter `useOldCSIDriver` that will use the previous `CSIDriver`.
+Users upgrading to this version should pre-delete the existing `CSIDriver` object (example: `kubectl delete csidriver amc.ebs.csi.aws.com`). This will not affect any existing volumes, but will cause the EBS CSI Driver to be unavailable to handle future requests, and should be immediately followed by an upgrade. For users that cannot delete the `CSIDriver` object, v2.11.1 implements a new parameter `useOldCSIDriver` that will use the previous `CSIDriver`.
 
 * Bump app/driver to version `v1.11.3`
 * Add support for leader election tuning for `csi-provisioner` and `csi-attacher` ([#1371](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/pull/1371), [@moogzy](https://github.com/moogzy))

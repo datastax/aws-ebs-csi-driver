@@ -983,7 +983,7 @@ func removeTaintInBackground(k8sClient kubernetes.Interface, backoff wait.Backof
 	}
 }
 
-// removeNotReadyTaint removes the taint ebs.csi.aws.com/agent-not-ready from the local node
+// removeNotReadyTaint removes the taint amc.ebs.csi.aws.com/agent-not-ready from the local node
 // This taint can be optionally applied by users to prevent startup race conditions such as
 // https://github.com/kubernetes/kubernetes/issues/95911
 func removeNotReadyTaint(clientset kubernetes.Interface) error {

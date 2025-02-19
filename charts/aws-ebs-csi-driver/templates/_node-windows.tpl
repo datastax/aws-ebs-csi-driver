@@ -95,7 +95,7 @@ spec:
           env:
             - name: CSI_ENDPOINT
             {{- if .Values.node.windowsHostProcess }}
-              value: unix://C:\\var\\lib\\kubelet\\plugins\\ebs.csi.aws.com\\csi.sock
+              value: unix://C:\\var\\lib\\kubelet\\plugins\\amc.ebs.csi.aws.com\\csi.sock
             {{- else }}
               value: unix:/csi/csi.sock
             {{- end }}
@@ -175,15 +175,15 @@ spec:
           env:
             - name: ADDRESS
             {{- if .Values.node.windowsHostProcess }}
-              value: unix://C:\\var\\lib\\kubelet\\plugins\\ebs.csi.aws.com\\csi.sock
+              value: unix://C:\\var\\lib\\kubelet\\plugins\\amc.ebs.csi.aws.com\\csi.sock
             {{- else }}
               value: unix:/csi/csi.sock
             {{- end }}
             - name: DRIVER_REG_SOCK_PATH
             {{- if .Values.node.windowsHostProcess }}
-              value: C:\\var\\lib\\kubelet\\plugins\\ebs.csi.aws.com\\csi.sock
+              value: C:\\var\\lib\\kubelet\\plugins\\amc.ebs.csi.aws.com\\csi.sock
             {{- else }}
-              value: C:\var\lib\kubelet\plugins\ebs.csi.aws.com\csi.sock
+              value: C:\var\lib\kubelet\plugins\amc.ebs.csi.aws.com\csi.sock
             {{- end }}
           {{- if .Values.node.windowsHostProcess }}
             - name: PLUGIN_REG_DIR
@@ -210,7 +210,7 @@ spec:
             - name: registration-dir
               mountPath: C:\registration
             - name: probe-dir
-              mountPath: C:\var\lib\kubelet\plugins\ebs.csi.aws.com
+              mountPath: C:\var\lib\kubelet\plugins\amc.ebs.csi.aws.com
           {{- with default .Values.node.resources .Values.sidecars.nodeDriverRegistrar.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
@@ -224,7 +224,7 @@ spec:
           {{- end }}
           args:
             {{- if .Values.node.windowsHostProcess }}
-            - --csi-address=unix://C:\\var\\lib\\kubelet\\plugins\\ebs.csi.aws.com\\csi.sock
+            - --csi-address=unix://C:\\var\\lib\\kubelet\\plugins\\amc.ebs.csi.aws.com\\csi.sock
             {{- else }}
             - --csi-address=unix:/csi/csi.sock
             {{- end }}
@@ -248,7 +248,7 @@ spec:
             type: Directory
         - name: plugin-dir
           hostPath:
-            path: C:\var\lib\kubelet\plugins\ebs.csi.aws.com
+            path: C:\var\lib\kubelet\plugins\amc.ebs.csi.aws.com
             type: DirectoryOrCreate
         - name: registration-dir
           hostPath:

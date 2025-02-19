@@ -96,7 +96,7 @@ Recommended daemonset tolerations
 */}}
 {{- define "aws-ebs-csi-driver.daemonset-tolerations" -}}
 # Prevents stateful workloads from being scheduled to node before CSI Driver reports volume attachment limit
-- key: "ebs.csi.aws.com/agent-not-ready"
+- key: "amc.ebs.csi.aws.com/agent-not-ready"
   operator: "Exists"
 # Prevents undesired eviction by Cluster Autoscalar
 - key: "ToBeDeletedByClusterAutoscaler"

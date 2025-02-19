@@ -6,7 +6,7 @@ metadata:
   name: ebs-csi-default-sc
   annotations:
     storageclass.kubernetes.io/is-default-class: "true"
-provisioner: ebs.csi.aws.com
+provisioner: amc.ebs.csi.aws.com
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
 {{- end }}

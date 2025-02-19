@@ -471,7 +471,7 @@ Due to an upcoming change in handling of IAM polices for the CreateVolume API wh
 ### Urgent Upgrade Notes
 *(No, really, you MUST read this before you upgrade)*
 
-* The AZ topology key `CreateVolume` returns has changed from `topology.ebs.csi.aws.com/zone` to `topology.kubernetes.io/zone`. Volumes created on `v1.33.0` or any future version will be incompatible with versions before `v1.28.0`. No other customer-facing impact is expected unless you directly depend on the topology label. For more information and the reasoning behind this change, see [issue #729](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/issues/729#issuecomment-1942026577).
+* The AZ topology key `CreateVolume` returns has changed from `topology.amc.ebs.csi.aws.com/zone` to `topology.kubernetes.io/zone`. Volumes created on `v1.33.0` or any future version will be incompatible with versions before `v1.28.0`. No other customer-facing impact is expected unless you directly depend on the topology label. For more information and the reasoning behind this change, see [issue #729](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/issues/729#issuecomment-1942026577).
 
 ### Notable Changes
 * Migrate CreateVolume response topology to standard label topology.kubernetes.io/zone ([#2086](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/pull/2086), [@ConnorJC3](https://github.com/ConnorJC3))
@@ -491,7 +491,7 @@ Due to an upcoming change in handling of IAM polices for the CreateVolume API wh
 
 # v1.32.0
 ### Announcements
-* The next minor version (`v1.33.0`) of the EBS CSI Driver will migrate the AZ topology label `CreateVolume` returns from `topology.ebs.csi.aws.com/zone` to `topology.kubernetes.io/zone`. Volumes created on this or any future version will be incompatible with EBS CSI Driver versions before `v1.28.0`, preventing a downgrade of more than 5 releases in the past. No other customer-facing impact is expected unless you directly depend on the topology label. For more information and the reasoning behind this change, see [issue #729](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/issues/729#issuecomment-1942026577).
+* The next minor version (`v1.33.0`) of the EBS CSI Driver will migrate the AZ topology label `CreateVolume` returns from `topology.amc.ebs.csi.aws.com/zone` to `topology.kubernetes.io/zone`. Volumes created on this or any future version will be incompatible with EBS CSI Driver versions before `v1.28.0`, preventing a downgrade of more than 5 releases in the past. No other customer-facing impact is expected unless you directly depend on the topology label. For more information and the reasoning behind this change, see [issue #729](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/issues/729#issuecomment-1942026577).
 
 ### Bug Fixes
 * Fix off-by-one error in ENI calculation when using IMDS metadata ([#2065](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/pull/2065), [@AndrewSirenko](https://github.com/AndrewSirenko))
@@ -566,7 +566,7 @@ Due to an upcoming change in handling of IAM polices for the CreateVolume API wh
     * In its default behavior, the EBS CSI Driver will attempt to guess the number of reserved volume slots via IMDS metadata (when it is available). Specifying the `--reserved-volume-attachments` CLI option overrides this heuristic value with a user-supplied value.
     * It is strongly encouraged for users that need to reserve a well-known number of volume slots for non-CSI volumes (such as mounting an extra volume for `/var/lib/docker` data) use this new CLI option to avoid incorrect or incosistent behavior from the heuristic.
 * Report zone via well-known topology key in NodeGetInfo ([#1931](https://github.com/kubernetes-sigs/aws-ebs-csi-driver/pull/1931), [@ConnorJC3](https://github.com/ConnorJC3))
-    * A future release of the EBS CSI Driver will migrate the topology key for created volumes from `topology.ebs.csi.aws.com/zone` to the well-known and standard `topology.kubernetes.io/zone`.
+    * A future release of the EBS CSI Driver will migrate the topology key for created volumes from `topology.amc.ebs.csi.aws.com/zone` to the well-known and standard `topology.kubernetes.io/zone`.
     * After this future migration, downgrades of the EBS CSI Driver to versions prior to `v1.28.0` will become impossible in some environments (particularly, environments not running the [AWS CCM](https://github.com/kubernetes/cloud-provider-aws)).
 
 ### Bug Fixes

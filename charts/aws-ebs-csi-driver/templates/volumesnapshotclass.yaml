@@ -11,7 +11,7 @@ metadata:
   {{- with .labels }}
   labels: {{- . | toYaml | trim | nindent 4 }}
   {{- end }}
-driver: ebs.csi.aws.com
+driver: amc.ebs.csi.aws.com
 deletionPolicy: {{ .deletionPolicy }}
 {{- with .parameters }}
 parameters: {{- . | toYaml | trim | nindent 2 }}
