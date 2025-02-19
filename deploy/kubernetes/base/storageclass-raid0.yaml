@@ -1,0 +1,13 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3-raid0
+parameters:
+  type: gp3
+  iops: "3000"
+  throughput: "125"
+  amc.datastax.com/storage-raidtype: raid0
+  amc.datastax.com/storage-lvm-stripe-count: "3"
+provisioner: amc.ebs.csi.aws.com
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer

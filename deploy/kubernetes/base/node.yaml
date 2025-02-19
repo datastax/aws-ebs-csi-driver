@@ -3,7 +3,7 @@
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: ebs-csi-node
+  name: amc-ebs-csi-node
   labels:
     app.kubernetes.io/name: aws-ebs-csi-driver
 spec:
@@ -49,6 +49,7 @@ spec:
       tolerations:
         - operator: Exists
       hostNetwork: false
+      hostPID: true
       securityContext:
         fsGroup: 0
         runAsGroup: 0

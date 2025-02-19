@@ -4,7 +4,7 @@
 kind: Deployment
 apiVersion: apps/v1
 metadata:
-  name: ebs-csi-controller
+  name: amc-ebs-csi-controller
   labels:
     app.kubernetes.io/name: aws-ebs-csi-driver
 spec:

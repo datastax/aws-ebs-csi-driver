@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../ecr-public
+images:
+- name: public.ecr.aws/ebs-csi-driver/aws-ebs-csi-driver
+  newName: docker.io/michaelburman290/aws-ebs-csi-driver
+  newTag: amc-Linux-amd64-al2023
+
+# namePrefix: amc-
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: amc-aws-ebs-csi-driver
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/instance: amc
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/name: amc-aws-ebs-csi-driver
+      app: amc-aws-ebs-csi-driver
