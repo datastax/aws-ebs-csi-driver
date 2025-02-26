@@ -235,6 +235,13 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 			return nil, status.Errorf(codes.Internal, "Could not scan volume groups: %v", err)
 		}
 
+		// This is hack for the replace of a PVC. After exporting it and detaching the disks, we are left with a phantom VG that the system thinks
+		// still exists. When we try to import a new PVC with the same NVME addresses it fails because it thinks those disks (or some of them) are still
+		// part of the VG. This is a workaround to remove the VGs that are not attached to any device.
+		if err := command.ImportAllVolumeGroups(ctx); err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not activate volume groups: %v", err)
+		}
+
 		vg, err := command.FindVolumeGroup(ctx, volumeName)
 		if err != nil && err != command.ErrNotFound {
 			return nil, status.Errorf(codes.Internal, "Could not search for volume group: %v", err)
@@ -252,6 +259,15 @@ func (d *NodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVol
 				return nil, status.Errorf(codes.Internal, "Could not create volume group: %v", err)
 			}
 		}
+
+		/*
+			// Once the workaround with vgexport not removing the metadata is solved, this can be re-enabled. For now, we will just import all the VGs automatically
+			if vg.Exported(ctx) {
+				if err := vg.Import(ctx); err != nil {
+					return nil, status.Errorf(codes.Internal, "Could not import volume group: %v", err)
+				}
+			}
+		*/
 
 		if err := vg.Activate(ctx); err != nil {
 			return nil, status.Errorf(codes.Internal, "Could not activate volume group: %v", err)
@@ -459,6 +475,10 @@ func (d *NodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstag
 
 		if err := vg.Deactivate(ctx); err != nil {
 			return nil, status.Errorf(codes.Internal, "Could not deactivate volume group: %v", err)
+		}
+
+		if err := vg.Export(ctx); err != nil {
+			return nil, status.Errorf(codes.Internal, "Could not export volume group: %v", err)
 		}
 	}
 

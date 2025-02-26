@@ -604,6 +604,18 @@ func (v *VolumeGroup) Deactivate(ctx context.Context) error {
 	return callLVM(ctx, "vgchange", "-a", "n", v.Name())
 }
 
+func (v *VolumeGroup) Exported(ctx context.Context) bool {
+	return v.state.exported
+}
+
+func (v *VolumeGroup) Export(ctx context.Context) error {
+	return callLVM(ctx, "vgexport", v.Name())
+}
+
+func (v *VolumeGroup) Import(ctx context.Context) error {
+	return callLVM(ctx, "vgimport", v.Name())
+}
+
 func ScanVolumeGroups(ctx context.Context, devices []string) error {
 	vgScanArsg := []string{
 		"vgscan",
@@ -635,4 +647,8 @@ func CreateVolumeGroup(ctx context.Context, name string, devices []string) (*Vol
 	}
 
 	return FindVolumeGroup(ctx, name)
+}
+
+func ImportAllVolumeGroups(ctx context.Context) error {
+	return callLVM(ctx, "vgimport", "--all")
 }

@@ -8,18 +8,20 @@ import (
 )
 
 type vg struct {
-	name string
-	uuid string
-	size uint64
-	free uint64
+	name     string
+	uuid     string
+	size     uint64
+	free     uint64
+	exported bool
 }
 
 func (u *vg) UnmarshalJSON(data []byte) error {
 	type vgInternal struct {
-		Name string `json:"vg_name"`
-		UUID string `json:"vg_uuid"`
-		Size string `json:"vg_size"`
-		Free string `json:"vg_free"`
+		Name     string `json:"vg_name"`
+		UUID     string `json:"vg_uuid"`
+		Size     string `json:"vg_size"`
+		Free     string `json:"vg_free"`
+		Exported string `json:"vg_exported"`
 	}
 
 	var temp vgInternal
@@ -40,6 +42,10 @@ func (u *vg) UnmarshalJSON(data []byte) error {
 		return convErr
 	}
 
+	if temp.Exported != "" {
+		u.exported = true
+	}
+
 	return nil
 }
 
@@ -51,7 +57,7 @@ func getVGReport(ctx context.Context, name string) (vg, error) {
 	}
 	res := new(vgReport)
 	args := []string{
-		"vgs", "-o", "vg_uuid,vg_name,vg_size,vg_free", "--units", "b", "--nosuffix", "--reportformat", "json",
+		"vgs", "-o", "vg_uuid,vg_name,vg_size,vg_free,vg_exported", "--units", "b", "--nosuffix", "--reportformat", "json",
 	}
 	err := callLVMInto(ctx, res, verbosityLVMStateNoUpdate, args...)
 
