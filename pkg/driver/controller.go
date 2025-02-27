@@ -458,7 +458,8 @@ func (d *ControllerService) DeleteVolume(ctx context.Context, req *csi.DeleteVol
 			if _, err := d.cloud.DeleteDisk(ctx, disk.VolumeID); err != nil {
 				if errors.Is(err, cloud.ErrNotFound) {
 					klog.InfoS("DeleteVolume: attachment not found", "volumeID", disk.VolumeID)
-					return &csi.DeleteVolumeResponse{}, nil
+					continue // We need to deal with rest of the disks anyway
+					// return &csi.DeleteVolumeResponse{}, nil
 				}
 				return nil, status.Errorf(codes.Internal, "Could not delete volume %q: %v", disk.VolumeID, err)
 			}
@@ -588,7 +589,7 @@ func (d *ControllerService) ControllerUnpublishVolume(ctx context.Context, req *
 		disks, err := d.cloud.GetDisksByName(ctx, volumeID)
 		if err != nil {
 			if errors.Is(err, cloud.ErrNotFound) {
-				klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", volumeID, "nodeID", nodeID)
+				klog.InfoS("ControllerUnpublishVolume: unable to find LVM disks", "volumeID", volumeID, "nodeID", nodeID)
 				return &csi.ControllerUnpublishVolumeResponse{}, nil
 			}
 			return nil, status.Errorf(codes.Internal, "Could not get disks for volume %q: %v", volumeID, err)
@@ -597,9 +598,10 @@ func (d *ControllerService) ControllerUnpublishVolume(ctx context.Context, req *
 		for _, disk := range disks {
 			klog.InfoS("Detaching raid disk", "pvcName", volumeID, "volumeID", disk.VolumeID)
 			if err := d.cloud.DetachDisk(ctx, disk.VolumeID, nodeID); err != nil {
-				if errors.Is(err, cloud.ErrNotFound) {
-					klog.InfoS("ControllerUnpublishVolume: attachment not found", "volumeID", disk.VolumeID, "nodeID", nodeID)
-					return &csi.ControllerUnpublishVolumeResponse{}, nil
+				if errors.Is(err, cloud.ErrNotFound) || errors.Is(err, cloud.ErrNotAttached) {
+					klog.InfoS("ControllerUnpublishVolume: attachment not found on this node", "volumeID", disk.VolumeID, "nodeID", nodeID)
+					continue // We need to deal with rest of the disks anyway
+					// return &csi.ControllerUnpublishVolumeResponse{}, nil
 				}
 				return nil, status.Errorf(codes.Internal, "Could not detach volume %q from node %q: %v", disk.VolumeID, nodeID, err)
 			}

@@ -176,6 +176,9 @@ var (
 
 	// ErrInvalidRequest is returned if parameters were rejected by driver.
 	ErrInvalidRequest = errors.New("invalid request")
+
+	// ErrNotAttached is returned if a volume is not attached.
+	ErrNotAttached = errors.New("called on non-attached volume")
 )
 
 // Set during build time via -ldflags.
@@ -988,6 +991,7 @@ func (c *cloud) DetachDisk(ctx context.Context, volumeID, nodeID string) error {
 
 	if !device.IsAlreadyAssigned {
 		klog.InfoS("DetachDisk: called on non-attached volume", "volumeID", volumeID)
+		return ErrNotAttached
 	}
 
 	request := &ec2.DetachVolumeInput{
